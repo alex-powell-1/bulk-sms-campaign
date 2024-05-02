@@ -12,6 +12,7 @@ from twilio.rest import Client
 import csv
 import pandas
 import creds
+from creds import SERVER, DATABASE, USERNAME, PASSWORD, account_sid, auth_token
 import custom
 
 r"""
@@ -21,21 +22,10 @@ r"""
  |___|_|  |_|___/  \___/_/ \_|_|  |_|_|/_/ \_|___\___|_|\_|___/
 
 Author: Alex Powell          
+GUI version. To run on schedule, please use CLIVersion.py
 """
 
 TEST_MODE = False
-
-# Twilio Credentials
-account_sid = creds.account_sid
-auth_token = creds.auth_token
-
-# Database
-SERVER = creds.SERVER
-DATABASE = creds.DATABASE
-USERNAME = creds.USERNAME
-PASSWORD = creds.PASSWORD
-
-client = Client(account_sid, auth_token)
 
 csv_data_dict = {}
 
@@ -193,7 +183,6 @@ def send_text():
     # Get Listbox Value, Present Message Box with Segment
     segment = ""
     message_script = custom.header_text + message_box.get("1.0", END)
-    response = ""
     single_phone = ""
     cp_data = {}
 
@@ -208,13 +197,15 @@ def send_text():
             confirm_box = False
         else:
             confirm_box = messagebox.askokcancel(title="Ready to Send?", message=f"These are the details entered:"
-                                                                                 f" \n\nMessage: {message_script}\n\nSent to: {segment}")
+                                                                                 f" \n\nMessage: {message_script}\n\n"
+                                                                                 f"Sent to: {segment}")
     elif single_number_checkbutton_used() == 1:
         original_number = single_number_input.get()
         single_phone = format_phone(original_number, prefix=True)
         if len(single_phone) == 12:
             confirm_box = messagebox.askokcancel(title="Ready to Send?", message=f"These are the details entered:"
-                                                                                 f" \n\nMessage: {message_script}\n\nSent to: {original_number}")
+                                                                                 f" \n\nMessage: {message_script}\n\n"
+                                                                                 f"Sent to: {original_number}")
         else:
             messagebox.showerror(title="error", message="Invalid phone number. Please try again.")
             confirm_box = False
@@ -228,8 +219,10 @@ def send_text():
 
         else:
             confirm_box = messagebox.askokcancel(title="Ready to Send?", message=f"These are the details entered:"
-                                                                                 f" \n\nMessage: {message_script}\n\nSent to: CSV List\n"
-                                                                                 f"Total Messages to Send: {len(csv_data_dict)}")
+                                                                                 f" \n\nMessage: {message_script}\n\n"
+                                                                                 f"Sent to: CSV List\n"
+                                                                                 f"Total Messages to Send: "
+                                                                                 f"{len(csv_data_dict)}")
     else:
         confirm_box = messagebox.showinfo(title="Error", message="You did not choose a selection. Try again.")
 
@@ -258,6 +251,7 @@ def send_text():
         # count will track all iterations through loop, successful or not
         count = 0
 
+        client = Client(account_sid, auth_token)
         # BEGIN ITERATING THROUGH SUBSCRIBERS
         for customer in cp_data:
             custom_message = create_custom_message(customer, message_script)
@@ -292,24 +286,24 @@ def send_text():
 
                 # Catch Errors
                 except twilio.base.exceptions.TwilioRestException as err:
-                        if str(err)[-22:] == "is not a mobile number":
-                            customer["response_code"] = f"Code: {err.code} - landline"
-                            move_phone_1_to_mbl_phone_1(customer["PHONE_1"])
+                    if str(err)[-22:] == "is not a mobile number":
+                        customer["response_code"] = f"Code: {err.code} - landline"
+                        move_phone_1_to_mbl_phone_1(customer["PHONE_1"])
 
-                        elif str(err)[0:112] == ("HTTP 400 error: Unable to create record: "
-                                                 "Permission to send an SMS has not been enabled "
-                                                 "for the region indicated"):
-                            customer["response_code"] = f"Code: {err.code} - No Permission to send SMS"
+                    elif str(err)[0:112] == ("HTTP 400 error: Unable to create record: "
+                                             "Permission to send an SMS has not been enabled "
+                                             "for the region indicated"):
+                        customer["response_code"] = f"Code: {err.code} - No Permission to send SMS"
 
-                        elif err == ("HTTP 400 error: Unable to create record: "
-                                     "Attempt to send to unsubscribed recipient"):
-                            customer["response_code"] = f"Code: {err.code} - Unsubscribed"
-                            unsubscribe_customer_from_sms(customer)
+                    elif err == ("HTTP 400 error: Unable to create record: "
+                                 "Attempt to send to unsubscribed recipient"):
+                        customer["response_code"] = f"Code: {err.code} - Unsubscribed"
+                        unsubscribe_customer_from_sms(customer)
 
-                        elif err.code == 20003:
-                            customer["response_code"] = f"Code: {err.code} - Permission Denied. Check Auth Token"
-                        else:
-                            customer['response_code'] = f"Code: {err.code} - Unknown TwilioRestException"
+                    elif err.code == 20003:
+                        customer["response_code"] = f"Code: {err.code} - Permission Denied. Check Auth Token"
+                    else:
+                        customer['response_code'] = f"Code: {err.code} - Unknown TwilioRestException"
                 except KeyboardInterrupt:
                     sys.exit()
 

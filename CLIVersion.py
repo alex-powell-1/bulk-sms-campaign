@@ -1,18 +1,15 @@
-import subprocess
-import sys
-import tkinter
-from tkinter import Listbox, IntVar, Checkbutton, messagebox, END, filedialog
-from tkinter.messagebox import showinfo
-from idlelib.redirector import WidgetRedirector
-import pyodbc
-from pyodbc import OperationalError
-import twilio.base.exceptions
-import queries
-from twilio.rest import Client
 import csv
+import sys
+
 import pandas
+import pyodbc
+import twilio.base.exceptions
+from pyodbc import OperationalError
+from twilio.rest import Client
+
 import creds
 import custom
+from creds import SERVER, DATABASE, USERNAME, PASSWORD, account_sid, auth_token
 
 r"""
   ___ __  __ ___    ___   _   __  __ ___  _   ___ ___ _  _ ___ 
@@ -20,21 +17,9 @@ r"""
  \__ | |\/| \__ \ | (__ / _ \| |\/| |  _/ _ \ | | (_ | .` \__ \
  |___|_|  |_|___/  \___/_/ \_|_|  |_|_|/_/ \_|___\___|_|\_|___/
 
-Author: Alex Powell          
+Author: Alex Powell  
+Script version for running from .bat file on schedule        
 """
-
-
-# Twilio Credentials
-account_sid = creds.account_sid
-auth_token = creds.auth_token
-
-# Database
-SERVER = creds.SERVER
-DATABASE = creds.DATABASE
-USERNAME = creds.USERNAME
-PASSWORD = creds.PASSWORD
-
-client = Client(account_sid, auth_token)
 
 csv_data_dict = {}
 
@@ -83,7 +68,7 @@ def query_db(sql_query):
         return cp_data
 
     except OperationalError:
-        messagebox.showerror(title="Network Error", message="Cannot connect to server. Check VPN settings.")
+        print("Cannot connect to server. Check VPN settings.")
 
 
 def move_phone_1_to_mbl_phone_1(phone_number):
@@ -147,16 +132,14 @@ def create_custom_message(customer, message):
 
 # ---------------------------- TWILIO TEXT API ------------------------------ #
 def send_text(recipients, sms_message, error_log, test_mode=False, photo_message=False, photo_url=""):
-    # Get Listbox Value, Present Message Box with Segment
-    segment = ""
     message_script = custom.header_text + sms_message
-    response = ""
-    single_phone = ""
 
     # total_messages_sent will track successful messages
-    total_messages_sent = 0
     # count will track all iterations through loop, successful or not
+    total_messages_sent = 0
     count = 0
+
+    client = Client(account_sid, auth_token)
 
     # BEGIN ITERATING THROUGH SUBSCRIBERS
     for customer in recipients:
@@ -267,16 +250,17 @@ def format_phone(phone_number, mode="Twilio", prefix=False):
         return formatted_phone
 
 
-message = ("Use this coupon to save $5 on any hanging baskets Thursday - Saturday! "
-           "NO LIMIT. Your reward balance is: {rewards}.")
+def mass_sms_campaign():
+    message = ("Use this coupon to save $5 on any hanging baskets Thursday - Saturday! "
+               "NO LIMIT. Your reward balance is: {rewards}.")
 
-photo_link = ""
+    photo_link = ""
 
-# contact_list = "./csv_data/050124.csv"
+    contact_list = "./csv_data/test.csv"
 
-send_text(recipients=read_csv(contact_list),
-          sms_message=message,
-          test_mode=False,
-          photo_message=True,
-          photo_url=photo_link,
-          error_log=creds.error_log)
+    send_text(recipients=read_csv(contact_list),
+              sms_message=message,
+              test_mode=True,
+              photo_message=True,
+              photo_url=photo_link,
+              error_log=creds.error_log)
