@@ -270,7 +270,7 @@ def format_phone(phone_number, mode="Twilio", prefix=False):
 message = ("Use this coupon to save $5 on any hanging baskets Thursday - Saturday! "
            "NO LIMIT. Your reward balance is: {rewards}.")
 
-photo_link = "https://settlemyrenursery.com/content/HBD.jpg"
+photo_link = ""
 
 # contact_list = "./csv_data/050124.csv"
 
