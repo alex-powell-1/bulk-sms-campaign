@@ -146,7 +146,7 @@ def create_custom_message(customer, message):
 
 
 # ---------------------------- TWILIO TEXT API ------------------------------ #
-def send_text(recipients, sms_message, test_mode=False, photo_message=False, photo_url=""):
+def send_text(recipients, sms_message, error_log, test_mode=False, photo_message=False, photo_url=""):
     # Get Listbox Value, Present Message Box with Segment
     segment = ""
     message_script = custom.header_text + sms_message
@@ -192,23 +192,29 @@ def send_text(recipients, sms_message, test_mode=False, photo_message=False, pho
             # Catch Errors
             except twilio.base.exceptions.TwilioRestException as err:
                 if str(err)[-22:] == "is not a mobile number":
-                    customer["response_code"] = "landline"
+                    customer["response_code"] = f"Code: {err.code} - landline"
                     move_phone_1_to_mbl_phone_1(customer["PHONE_1"])
 
                 elif str(err)[0:112] == ("HTTP 400 error: Unable to create record: "
                                          "Permission to send an SMS has not been enabled "
                                          "for the region indicated"):
-                    customer["response_code"] = "No Permission to send SMS"
+                    customer["response_code"] = f"Code: {err.code} - No Permission to send SMS"
 
                 elif err == ("HTTP 400 error: Unable to create record: "
                              "Attempt to send to unsubscribed recipient"):
-                    customer["response_code"] = "Unsubscribed"
+                    customer["response_code"] = f"Code: {err.code} - Unsubscribed"
                     unsubscribe_customer_from_sms(customer)
 
+                elif err.code == 20003:
+                    customer["response_code"] = f"Code: {err.code} - Permission Denied. Check Auth Token"
                 else:
-                    customer['response_code'] = "Unknown Error"
+                    customer['response_code'] = f"Code: {err.code} - Unknown TwilioRestException"
             except KeyboardInterrupt:
                 sys.exit()
+            except Exception as err:
+                print(f'Error: {err}', file=error_log)
+                customer['response_code'] = str(err)
+
             # Success
             else:
                 customer['response_code'] = twilio_message.sid
@@ -261,14 +267,16 @@ def format_phone(phone_number, mode="Twilio", prefix=False):
         return formatted_phone
 
 
-message = ("We are releasing thousands of new flowers right now! "
-           "Use this coupon Thursday - Saturday to save $10 off a purchase of $50 or more! "
-           "Expires Saturday, April 27th! Your reward balance is: {rewards}.")
+message = ("Use this coupon to save $5 on any hanging baskets Thursday - Saturday! "
+           "NO LIMIT. Your reward balance is: {rewards}.")
 
-photo_link = "https://settlemyrenursery.com/content/T-C12.jpg"
+photo_link = "https://settlemyrenursery.com/content/HBD.jpg"
 
-send_text(recipients=read_csv("424.csv"),
+# contact_list = "./csv_data/050124.csv"
+
+send_text(recipients=read_csv(contact_list),
           sms_message=message,
           test_mode=False,
           photo_message=True,
-          photo_url=photo_link)
+          photo_url=photo_link,
+          error_log=creds.error_log)
