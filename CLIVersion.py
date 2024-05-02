@@ -11,15 +11,15 @@ import creds
 import custom
 from creds import SERVER, DATABASE, USERNAME, PASSWORD, account_sid, auth_token
 
-r"""
-  ___ __  __ ___    ___   _   __  __ ___  _   ___ ___ _  _ ___ 
- / __|  \/  / __|  / __| /_\ |  \/  | _ \/_\ |_ _/ __| \| / __|
- \__ | |\/| \__ \ | (__ / _ \| |\/| |  _/ _ \ | | (_ | .` \__ \
- |___|_|  |_|___/  \___/_/ \_|_|  |_|_|/_/ \_|___\___|_|\_|___/
 
-Author: Alex Powell  
-Script version for running from .bat file on schedule        
-"""
+#   ___ __  __ ___    ___   _   __  __ ___  _   ___ ___ _  _ ___
+#  / __|  \/  / __|  / __| /_\ |  \/  | _ \/_\ |_ _/ __| \| / __|
+#  \__ | |\/| \__ \ | (__ / _ \| |\/| |  _/ _ \ | | (_ | .` \__ \
+#  |___|_|  |_|___/  \___/_/ \_|_|  |_|_|/_/ \_|___\___|_|\_|___/
+#
+# Author: Alex Powell
+# Script version for running from .bat file on schedule
+
 
 csv_data_dict = {}
 

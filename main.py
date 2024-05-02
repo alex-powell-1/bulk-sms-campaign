@@ -1,29 +1,31 @@
+import csv
 import subprocess
 import sys
 import tkinter
+from idlelib.redirector import WidgetRedirector
 from tkinter import Listbox, IntVar, Checkbutton, messagebox, END, filedialog
 from tkinter.messagebox import showinfo
-from idlelib.redirector import WidgetRedirector
-import pyodbc
-from pyodbc import OperationalError
-import twilio.base.exceptions
-import queries
-from twilio.rest import Client
-import csv
+
 import pandas
+import pyodbc
+import twilio.base.exceptions
+from pyodbc import OperationalError
+from twilio.rest import Client
+
 import creds
-from creds import SERVER, DATABASE, USERNAME, PASSWORD, account_sid, auth_token
 import custom
+import queries
+from creds import SERVER, DATABASE, USERNAME, PASSWORD, account_sid, auth_token
 
-r"""
-  ___ __  __ ___    ___   _   __  __ ___  _   ___ ___ _  _ ___ 
- / __|  \/  / __|  / __| /_\ |  \/  | _ \/_\ |_ _/ __| \| / __|
- \__ | |\/| \__ \ | (__ / _ \| |\/| |  _/ _ \ | | (_ | .` \__ \
- |___|_|  |_|___/  \___/_/ \_|_|  |_|_|/_/ \_|___\___|_|\_|___/
 
-Author: Alex Powell          
-GUI version. To run on schedule, please use CLIVersion.py
-"""
+#   ___ __  __ ___    ___   _   __  __ ___  _   ___ ___ _  _ ___
+#  / __|  \/  / __|  / __| /_\ |  \/  | _ \/_\ |_ _/ __| \| / __|
+#  \__ | |\/| \__ \ | (__ / _ \| |\/| |  _/ _ \ | | (_ | .` \__ \
+#  |___|_|  |_|___/  \___/_/ \_|_|  |_|_|/_/ \_|___\___|_|\_|___/
+#
+# Author: Alex Powell
+# GUI version. To run on schedule, please use CLIVersion.py
+
 
 TEST_MODE = False
 
