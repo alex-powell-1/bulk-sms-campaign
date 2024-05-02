@@ -292,24 +292,31 @@ def send_text():
 
                 # Catch Errors
                 except twilio.base.exceptions.TwilioRestException as err:
-                    if str(err)[-22:] == "is not a mobile number":
-                        customer["response_code"] = "landline"
-                        move_phone_1_to_mbl_phone_1(customer["PHONE_1"])
+                        if str(err)[-22:] == "is not a mobile number":
+                            customer["response_code"] = f"Code: {err.code} - landline"
+                            move_phone_1_to_mbl_phone_1(customer["PHONE_1"])
 
-                    elif str(err)[0:112] == ("HTTP 400 error: Unable to create record: "
-                                             "Permission to send an SMS has not been enabled "
-                                             "for the region indicated"):
-                        customer["response_code"] = "No Permission to send SMS"
+                        elif str(err)[0:112] == ("HTTP 400 error: Unable to create record: "
+                                                 "Permission to send an SMS has not been enabled "
+                                                 "for the region indicated"):
+                            customer["response_code"] = f"Code: {err.code} - No Permission to send SMS"
 
-                    elif err == ("HTTP 400 error: Unable to create record: "
-                                 "Attempt to send to unsubscribed recipient"):
-                        customer["response_code"] = "Unsubscribed"
-                        unsubscribe_customer_from_sms(customer)
+                        elif err == ("HTTP 400 error: Unable to create record: "
+                                     "Attempt to send to unsubscribed recipient"):
+                            customer["response_code"] = f"Code: {err.code} - Unsubscribed"
+                            unsubscribe_customer_from_sms(customer)
 
-                    else:
-                        customer['response_code'] = "Unknown Error"
+                        elif err.code == 20003:
+                            customer["response_code"] = f"Code: {err.code} - Permission Denied. Check Auth Token"
+                        else:
+                            customer['response_code'] = f"Code: {err.code} - Unknown TwilioRestException"
                 except KeyboardInterrupt:
                     sys.exit()
+
+                except Exception as err:
+                    print(f'Error: {err}', file=creds.error_log)
+                    customer['response_code'] = str(err)
+
                 # Success
                 else:
                     customer['response_code'] = twilio_message.sid
