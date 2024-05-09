@@ -207,7 +207,11 @@ def send_text(recipients, sms_message, error_log, test_mode=False, photo_message
         progress = f"{count}/{len(recipients)}"
         print(progress)
         customer['count'] = progress
-        write_log(customer)
+
+        try:
+            write_log(customer)
+        except Exception as err:
+            print(f'Log Error: {err}', file=creds.error_log)
 
 
 def write_log(customer):

@@ -320,10 +320,14 @@ def send_text():
 
             count += 1
             customer['count'] = f"{count}/{len(cp_data)}"
-            write_log(customer)
 
-            progress_text_label.config(text=f"Messages Sent: {count}/{len(cp_data)}")
-            canvas.update()
+            try:
+                write_log(customer)
+            except Exception as err:
+                print(f'Log Error: {err}', file=creds.error_log)
+            finally:
+                progress_text_label.config(text=f"Messages Sent: {count}/{len(cp_data)}")
+                canvas.update()
 
         completed_message = (f"Process complete!\n"
                              f"{total_messages_sent} messages sent. \n"

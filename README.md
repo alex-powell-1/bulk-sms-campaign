@@ -1,44 +1,45 @@
-SMS Campaigns
-
+# Project Documentation
 Author: Alex Powell
+## Overview
 
-This cross platform Tkinter/Python application queries a Counterpoint POS associated SQL database for customer data and sends programmatic text (through Twilio API) based on 1) single phone number entry or 2) .csv upload or 3) customer data.
+This project is a Python-based SMS messaging application that allows users to send custom messages to different customer segments. The application uses the Twilio API for sending SMS messages and pyodbc for interacting with a SQL Server database.
 
-The application can send standard SMS messages or MMS with pictures.
+## Dependencies
 
-CLIVersion.py allows for running from bat file on schedule.
+- Python
+- pyodbc
+- pandas
+- tkinter
+- twilio
 
-If the application receives an API response that the number is actually a landline, it will automatically move the customer's phone number over to the established landline field in SQL. In this regard, the application helps clean the database.
+## Files
 
-GUI Contact Selection Methods:
+- `main.py`: This is the main script that runs the application. It contains the GUI setup and the logic for sending SMS messages.
+- `queries.py`: This file contains SQL queries that are used to fetch customer data from the database.
+- `creds.py`: This file contains sensitive information such as database credentials and Twilio API keys.
+- `custom.py`: This file contains custom configurations for the application.
 
-1) Single Phone - just enter a single phone number and it will send it directly to this number
+## Features
 
-2) .csv upload - select a csv file with the following four columns 1)CUST_NO, FST_NAM, PHONE_1, LOY_PTS_BAL
+- **Customer Segmentation**: The application allows users to send messages to different customer segments. The segments are defined in the `queries.py` file.
+- **Custom Messages**: Users can create custom messages with placeholders for customer name and reward balance.
+- **CSV Import**: Users can import a CSV file with customer data to send messages to.
+- **Single Phone Number Messaging**: Users can send a message to a single phone number.
+- **Test Mode**: Users can enable test mode to run the application without actually sending messages.
+- **Log Viewing**: Users can view a log of sent messages.
 
-LOY_PTS_BAL is a balance of reward points
+## Usage
 
-3) Customer Segment
+1. Run the `main.py` script to start the application.
+2. Choose one of the options to select the recipients of the message:
+   - Single Phone Number: Enter a phone number in the input field.
+   - Use .csv File: Click the 'Import CSV' button and select a CSV file with customer data.
+   - Use Customer Segment: Select a customer segment from the dropdown.
+3. Enter your message in the 'Message' text box. You can use `{name}` and `{rewards}` as placeholders for the customer's name and reward balance respectively.
+4. If you want to include a picture in the message, check the 'Include Picture Link?' checkbox and enter the URL of the picture in the input field.
+5. Click the 'Send' button to send the messages.
+6. You can view a log of sent messages by clicking the 'View Log' button.
 
-Currently, texts can be sent for several segments, including:
+## Note
 
-Management Test Group
-Wholesale Customers
-Retail Customers: All
-Yesterday's Shoppers
-5 Day follow-up
-1 week follow-up
-Retail: Most recent 1000 customers
-Retail: Most recent 2000 customers
-Retail: Most recent 3000 customers
-Retail: Most recent 4000 customers
-Spring Annual Shoppers
-Fall Mum Shoppers
-Christmas Shoppers
-No purchases in 6 months
-No purchases in 12 months
-By Birthday Month
-
-The application logs the sent message history to a desired path.
-
-The application has a test mode that allows you to run the process without actually sending the messages through the API so you can check recipients in log before sending.
+Please ensure that you have the necessary permissions to send SMS messages and access the database. Also, make sure that your Twilio account is properly set up and funded.
