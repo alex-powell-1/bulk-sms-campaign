@@ -1,3 +1,6 @@
 creds.py
 custom.py
 images/*
+.idea/
+__pycache__/
+csv_data/
