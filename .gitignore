@@ -4,3 +4,7 @@ images/*
 .idea/
 __pycache__/
 csv_data/
+
+dist/
+build/
+.venv/
