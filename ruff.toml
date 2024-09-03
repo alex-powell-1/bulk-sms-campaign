@@ -1,0 +1,9 @@
+line-length = 116
+
+[lint]
+ignore = ["E722", "F405", "F403"]
+
+[format]
+quote-style = "single"
+indent-style = "space"
+skip-magic-trailing-comma = true
