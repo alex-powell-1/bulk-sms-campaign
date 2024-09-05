@@ -27,7 +27,9 @@ from error_handler import SMSErrorHandler
 #
 # Author: Alex Powell
 # GUI version. To run on schedule, please use CLIVersion.py
-
+version = 1.3
+# Release Notes: This version adds writing to database for each message sent.
+# Need to add sending to CONTCT_1 (if exists).
 
 TEST_MODE = False
 ORIGIN = creds.origin
@@ -219,51 +221,51 @@ def send_text():
             pts = customer['LOY_PTS_BAL']
             cat = customer['CATEG_COD']
 
-            cust = Database.SMS.CustomerText(phone=ph_1, cust_no=cust_no, points=pts, category=cat, name=name)
-            cust.message = create_custom_message(cust, message_script)
-            cust.campaign = campaign
+            cust_txt = Database.SMS.CustomerText(phone=ph_1, cust_no=cust_no, points=pts, category=cat, name=name)
+            cust_txt.message = create_custom_message(cust_txt, message_script)
+            cust_txt.campaign = campaign
 
             # Filter out any phone errors
-            if cust.phone == 'error':
-                cust.response_text = 'Invalid phone'
-                Database.SMS.insert(customer_text=cust)
+            if cust_txt.phone == 'error':
+                cust_txt.response_text = 'Invalid phone'
+                Database.SMS.insert(customer_text=cust_txt)
                 continue
 
             elif test_mode():
-                cust.sid = 'TEST'
+                cust_txt.sid = 'TEST'
                 total_messages_sent += 1
 
             else:
                 try:
                     if photo_checkbutton_used():
-                        cust.media = photo_input.get()
+                        cust_txt.media = photo_input.get()
                         twilio_message = client.messages.create(
                             from_=creds.TWILIO_PHONE_NUMBER,
-                            media_url=[cust.media],
-                            to=cust.phone,
-                            body=cust.message,
+                            media_url=[cust_txt.media],
+                            to=cust_txt.phone,
+                            body=cust_txt.message,
                         )
                     else:
                         twilio_message = client.messages.create(
-                            from_=creds.TWILIO_PHONE_NUMBER, to=cust.phone, body=cust.message
+                            from_=creds.TWILIO_PHONE_NUMBER, to=cust_txt.phone, body=cust_txt.message
                         )
 
                 # Catch Errors
                 except twilio.base.exceptions.TwilioRestException as err:
                     SMSErrorHandler.error_handler.add_error(
-                        error=f'Phone Number: {cust.phone}, Code: {err.code}, Message:{err.msg}',
+                        error=f'Phone Number: {cust_txt.phone}, Code: {err.code}, Message:{err.msg}',
                         origin='SMS-Campaigns->send_text()',
                     )
-                    cust.response_code = err.code
-                    cust.response_text = err.msg
+                    cust_txt.response_code = err.code
+                    cust_txt.response_text = err.msg
 
                     if err.code == 21614:
                         # From Twilio: You have attempted to send a SMS with a 'To' number that is not a valid
                         # mobile number. It is likely that the number is a landline number or is an invalid number.
-                        Database.SMS.move_phone_1_to_landline(customer_text=cust)
+                        Database.SMS.move_phone_1_to_landline(customer_text=cust_txt)
 
                     elif err.code == 21610:  # Previously unsubscribed
-                        Database.SMS.unsubscribe(customer_text=cust)
+                        Database.SMS.unsubscribe(customer_text=cust_txt)
 
                 except KeyboardInterrupt:
                     sys.exit()
@@ -272,18 +274,18 @@ def send_text():
                     SMSErrorHandler.error_handler.add_error(
                         error=f'Uncaught Exception: {err}', origin='SMS-Campaigns->send_text()', traceback=tb()
                     )
-                    cust.response_text = str(err)
+                    cust_txt.response_text = str(err)
 
                 # Success
                 else:
-                    cust.sid = twilio_message.sid
+                    cust_txt.sid = twilio_message.sid
                     total_messages_sent += 1
 
             count += 1
-            cust.count = f'{count}/{len(cp_data)}'
+            cust_txt.count = f'{count}/{len(cp_data)}'
 
             try:
-                Database.SMS.insert(cust)
+                Database.SMS.insert(cust_txt)
             except Exception as err:
                 with open(creds.error_log, 'a') as error_log:
                     print(f'Log Error: {err}', file=error_log)
@@ -662,7 +664,10 @@ progress_text_label.grid(column=0, row=21, columnspan=3, pady=0)
 
 # Version Number
 header_text_label = tkinter.Label(
-    text='      Version 1.3.01', font=('Arial', 9), fg=custom.MEDIUM_DARK_GREEN, background=custom.BACKGROUND_COLOR
+    text=f'      Version {version}',
+    font=('Arial', 9),
+    fg=custom.MEDIUM_DARK_GREEN,
+    background=custom.BACKGROUND_COLOR,
 )
 header_text_label.grid(column=2, row=19, columnspan=1, pady=0)
 
