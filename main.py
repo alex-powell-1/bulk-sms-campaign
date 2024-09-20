@@ -18,6 +18,7 @@ from database import Database
 from utilities import PhoneNumber
 from traceback import print_exc as tb
 from error_handler import SMSErrorHandler
+from concurrent.futures import ThreadPoolExecutor
 
 
 #   ___ __  __ ___    ___   _   __  __ ___  _   ___ ___ _  _ ___
@@ -213,8 +214,7 @@ def send_text():
 
         campaign = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-        # BEGIN ITERATING THROUGH SUBSCRIBERS
-        for customer in cp_data:
+        def tasks(customer):
             cust_no = customer['CUST_NO']
             name = customer['NAM']
             ph_1 = customer['PHONE_1']
@@ -229,7 +229,7 @@ def send_text():
             if cust_txt.phone == 'error':
                 cust_txt.response_text = 'Invalid phone'
                 Database.SMS.insert(customer_text=cust_txt)
-                continue
+                return
 
             elif test_mode():
                 cust_txt.sid = 'TEST'
@@ -292,6 +292,9 @@ def send_text():
             finally:
                 progress_text_label.config(text=f'Messages Sent: {count}/{len(cp_data)}')
                 canvas.update()
+
+        with ThreadPoolExecutor(max_workers=100) as executor:
+            executor.map(tasks, cp_data)
 
         completed_message = (
             f'Process complete!\n'
