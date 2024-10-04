@@ -114,7 +114,9 @@ def send_text():
     segment = ''
     message_script = custom.header_text + message_box.get('1.0', END)
     single_phone = ''
-    cp_data = {}
+    cp_data = [
+        {'CUST_NO': None, 'NAM': None, 'PHONE_1': None, 'PHONE_2': None, 'LOY_PTS_BAL': None, 'CATEG_COD': None}
+    ]
 
     # ------- Validate User Inputs -------- #
 
@@ -202,7 +204,7 @@ def send_text():
 
         # ----------DATA FOR SINGLE PHONE---------#
         elif single_number_checkbutton_used() == 1:
-            cp_data = [{'PHONE_1': single_phone}]
+            cp_data['PHONE_1'] = single_phone
 
         # total_messages_sent will track successful messages
         total_messages_sent = 0

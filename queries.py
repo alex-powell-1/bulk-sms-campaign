@@ -13,10 +13,7 @@ one_year_ago = date.today() + relativedelta(years=-1)
 two_year_ago = date.today() + relativedelta(years=-2)
 
 standard_filter = """
-INCLUDE_IN_MARKETING_MAILOUTS = 'Y' AND 
-PHONE_1 IS NOT NULL AND 
-FST_NAM IS NOT NULL AND
-FST_NAM != ''
+(SMS_1_IS_SUB = 'Y' AND PHONE_1 IS NOT NULL) or (SMS_2_IS_SUB = 'Y' and PHONE_2 IS NOT NULL)
 """
 
 # Alex Powell Only
