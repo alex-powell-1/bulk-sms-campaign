@@ -47,16 +47,3 @@ class PhoneNumber:
 
     def __str__(self):
         return f'({self.area_code}) {self.exchange}-{self.subscriber_number}'
-
-
-def log_sms_activity(
-    origin: str, campaign: str, phone: str, cust_no: str, name: str, category: str, event_type: str, message: str
-):
-    query = f"""
-    INSERT INTO {creds.sms_activity_table} (ORIGIN, CAMPAIGN, PHONE, CUST_NO, NAME, CATEGORY, EVENT_TYPE, MESSAGE)
-    VALUES ('{origin}', '{campaign}', '{phone}', '{cust_no}', '{name}', '{category}', '{event_type}', '{message}')"""
-    response = Database.query(query)
-    if response['code'] != 200:
-        SMSErrorHandler.error_handler.add_error_v(
-            f'Error inserting {event_type} event for {phone}. Response: {response}'
-        )

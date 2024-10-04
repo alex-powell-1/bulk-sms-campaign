@@ -2,10 +2,8 @@ import creds
 import pyodbc
 from pyodbc import ProgrammingError, Error
 import time
-from utilities import PhoneNumber, log_sms_activity
+from utilities import PhoneNumber
 from error_handler import SMSErrorHandler
-
-from config_file import config_data as config
 
 verbose = False
 
@@ -191,6 +189,25 @@ class Database:
                 SMSErrorHandler.error_handler.add_error_v(
                     error=f'Error moving {customer_text.phone} to landline. Response: {response}',
                     origin='move_phone_1_to_landline',
+                )
+
+        def log_sms_activity(
+            origin: str,
+            campaign: str,
+            phone: str,
+            cust_no: str,
+            name: str,
+            category: str,
+            event_type: str,
+            message: str,
+        ):
+            query = f"""
+            INSERT INTO {creds.sms_activity_table} (ORIGIN, CAMPAIGN, PHONE, CUST_NO, NAME, CATEGORY, EVENT_TYPE, MESSAGE)
+            VALUES ('{origin}', '{campaign}', '{phone}', '{cust_no}', '{name}', '{category}', '{event_type}', '{message}')"""
+            response = Database.query(query)
+            if response['code'] != 200:
+                SMSErrorHandler.error_handler.add_error_v(
+                    f'Error inserting {event_type} event for {phone}. Response: {response}'
                 )
 
         @staticmethod
