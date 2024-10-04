@@ -196,31 +196,56 @@ class Database:
         @staticmethod
         def subscribe(customer_text: CustomerText):
             phone = PhoneNumber(customer_text.phone).to_cp()
-            query = f"""
+
+            query1 = f"""
             UPDATE AR_CUST
-            SET {creds.sms_subscribe_status} = 'Y'
-            WHERE PHONE_1 = '{phone}' OR PHONE_2 = '{phone}'
+            SET SMS_1_IS_SUB = 'Y'
+            WHERE PHONE_1 = '{phone}'
             """
-            response = Database.query(query=query)
-            if response['code'] == 200:
-                query = f"""
-                INSERT INTO {creds.sms_activity_table} (ORIGIN, CAMPAIGN, PHONE, CUST_NO, NAME, CATEGORY, EVENT_TYPE, MESSAGE)
-                VALUES ('{Database.SMS.ORIGIN}', '{customer_text.campaign}', '{phone}', '{customer_text.cust_no}', '{customer_text.name}', '{customer_text.category}',
-                'Subscribe', 'SET {creds.sms_subscribe_status} = Y')"""
-                response = Database.query(query)
-                if response['code'] != 200:
+
+            query2 = f"""
+            UPDATE AR_CUST
+            SET SMS_2_IS_SUB = 'Y'
+            WHERE PHONE_2 = '{phone}'
+            """
+
+            try:
+                responses = [Database.query(query1), Database.query(query2)]
+                no_rows = 0
+                errors = 0
+
+                for responseIndex, response in enumerate(responses):
+                    if response['code'] == 200:
+                        column_str = 'SMS_1_IS_SUB' if responseIndex == 0 else 'SMS_2_IS_SUB'
+
+                        log_sms_activity(
+                            Database.SMS.ORIGIN,
+                            customer_text.campaign,
+                            phone,
+                            customer_text.cust_no,
+                            customer_text.name,
+                            customer_text.category,
+                            'Subscribe',
+                            f'SET {column_str} = Y',
+                        )
+                    elif response['code'] == 201:
+                        no_rows += 1
+                    else:
+                        errors += 1
+
+                if no_rows > 1:
                     SMSErrorHandler.error_handler.add_error_v(
-                        error=f'Error inserting subscribe event for {phone}. Response: {response}',
-                        origin='subscribe_sms',
+                        error=f'Error subscribing {phone}. Response: {responses}', origin='subscribe_sms'
                     )
-            elif response['code'] == 201:
-                """No rows affected"""
+
+                if errors > 1:
+                    SMSErrorHandler.error_handler.add_error_v(
+                        error=f'Error subscribing {phone}. Response: {responses}', origin='subscribe_sms'
+                    )
+
+            except Exception as err:
                 SMSErrorHandler.error_handler.add_error_v(
-                    error=f'No target phone found for {phone}', origin='subscribe_sms'
-                )
-            else:
-                SMSErrorHandler.error_handler.add_error_v(
-                    error=f'Error subscribing {phone} to SMS: Response: {response}', origin='subscribe_sms'
+                    error=f'Error subscribing {phone}. Response: {err}', origin='subscribe_sms'
                 )
 
         @staticmethod
@@ -244,8 +269,10 @@ class Database:
                 no_rows = 0
                 errors = 0
 
-                for response in responses:
+                for responseIndex, response in enumerate(responses):
                     if response['code'] == 200:
+                        column_str = 'SMS_1_IS_SUB' if responseIndex == 0 else 'SMS_2_IS_SUB'
+
                         log_sms_activity(
                             Database.SMS.ORIGIN,
                             customer_text.campaign,
@@ -254,7 +281,7 @@ class Database:
                             customer_text.name,
                             customer_text.category,
                             'Unsubscribe',
-                            f'SET {creds.sms_subscribe_status} = N',
+                            f'SET {column_str} = N',
                         )
                     elif response['code'] == 201:
                         no_rows += 1
