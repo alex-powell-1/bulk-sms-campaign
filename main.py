@@ -220,80 +220,89 @@ def send_text():
             cust_no = customer['CUST_NO']
             name = customer['NAM']
             ph_1 = customer['PHONE_1']
+            ph_2 = customer['PHONE_2']
             pts = customer['LOY_PTS_BAL']
             cat = customer['CATEG_COD']
 
             cust_txt = Database.SMS.CustomerText(phone=ph_1, cust_no=cust_no, points=pts, category=cat, name=name)
-            cust_txt.message = create_custom_message(cust_txt, message_script)
-            cust_txt.campaign = campaign
 
-            # Filter out any phone errors
-            if cust_txt.phone == 'error':
-                cust_txt.response_text = 'Invalid phone'
-                Database.SMS.insert(customer_text=cust_txt)
-                continue
+            def send_customer_text(cust_txt):
+                cust_txt.message = create_custom_message(cust_txt, message_script)
+                cust_txt.campaign = campaign
 
-            elif test_mode():
-                cust_txt.sid = 'TEST'
-                total_messages_sent += 1
+                # Filter out any phone errors
+                if cust_txt.phone == 'error':
+                    cust_txt.response_text = 'Invalid phone'
+                    Database.SMS.insert(customer_text=cust_txt)
+                    continue
 
-            else:
-                try:
-                    if photo_checkbutton_used():
-                        cust_txt.media = photo_input.get()
-                        twilio_message = client.messages.create(
-                            from_=creds.TWILIO_PHONE_NUMBER,
-                            media_url=[cust_txt.media],
-                            to=cust_txt.phone,
-                            body=cust_txt.message,
-                        )
-                    else:
-                        twilio_message = client.messages.create(
-                            from_=creds.TWILIO_PHONE_NUMBER, to=cust_txt.phone, body=cust_txt.message
-                        )
-
-                # Catch Errors
-                except twilio.base.exceptions.TwilioRestException as err:
-                    SMSErrorHandler.error_handler.add_error(
-                        error=f'Phone Number: {cust_txt.phone}, Code: {err.code}, Message:{err.msg}',
-                        origin='SMS-Campaigns->send_text()',
-                    )
-                    cust_txt.response_code = err.code
-                    cust_txt.response_text = err.msg
-
-                    if err.code == 21614:
-                        # From Twilio: You have attempted to send a SMS with a 'To' number that is not a valid
-                        # mobile number. It is likely that the number is a landline number or is an invalid number.
-                        Database.SMS.move_phone_1_to_landline(customer_text=cust_txt)
-
-                    elif err.code == 21610:  # Previously unsubscribed
-                        Database.SMS.unsubscribe(customer_text=cust_txt)
-
-                except KeyboardInterrupt:
-                    sys.exit()
-
-                except Exception as err:
-                    SMSErrorHandler.error_handler.add_error(
-                        error=f'Uncaught Exception: {err}', origin='SMS-Campaigns->send_text()', traceback=tb()
-                    )
-                    cust_txt.response_text = str(err)
-
-                # Success
-                else:
-                    cust_txt.sid = twilio_message.sid
+                elif test_mode():
+                    cust_txt.sid = 'TEST'
                     total_messages_sent += 1
 
-            count += 1
-            cust_txt.count = f'{count}/{len(cp_data)}'
+                else:
+                    try:
+                        if photo_checkbutton_used():
+                            cust_txt.media = photo_input.get()
+                            twilio_message = client.messages.create(
+                                from_=creds.TWILIO_PHONE_NUMBER,
+                                media_url=[cust_txt.media],
+                                to=cust_txt.phone,
+                                body=cust_txt.message,
+                            )
+                        else:
+                            twilio_message = client.messages.create(
+                                from_=creds.TWILIO_PHONE_NUMBER, to=cust_txt.phone, body=cust_txt.message
+                            )
 
-            try:
-                Database.SMS.insert(cust_txt)
-            except Exception as err:
-                with open(creds.error_log, 'a') as error_log:
-                    print(f'Log Error: {err}', file=error_log)
-            finally:
-                progress_text_label.config(text=f'Messages Sent: {count}/{len(cp_data)}')
-                canvas.update()
+                    # Catch Errors
+                    except twilio.base.exceptions.TwilioRestException as err:
+                        SMSErrorHandler.error_handler.add_error(
+                            error=f'Phone Number: {cust_txt.phone}, Code: {err.code}, Message:{err.msg}',
+                            origin='SMS-Campaigns->send_text()',
+                        )
+                        cust_txt.response_code = err.code
+                        cust_txt.response_text = err.msg
+
+                        if err.code == 21614:
+                            # From Twilio: You have attempted to send a SMS with a 'To' number that is not a valid
+                            # mobile number. It is likely that the number is a landline number or is an invalid number.
+                            Database.SMS.move_phone_1_to_landline(customer_text=cust_txt)
+
+                        elif err.code == 21610:  # Previously unsubscribed
+                            Database.SMS.unsubscribe(cust_txt)
+
+                    except KeyboardInterrupt:
+                        sys.exit()
+
+                    except Exception as err:
+                        SMSErrorHandler.error_handler.add_error(
+                            error=f'Uncaught Exception: {err}', origin='SMS-Campaigns->send_text()', traceback=tb()
+                        )
+                        cust_txt.response_text = str(err)
+
+                    # Success
+                    else:
+                        cust_txt.sid = twilio_message.sid
+                        total_messages_sent += 1
+
+                count += 1
+                cust_txt.count = f'{count}/{len(cp_data)}'
+
+                try:
+                    Database.SMS.insert(cust_txt)
+                except Exception as err:
+                    with open(creds.error_log, 'a') as error_log:
+                        print(f'Log Error: {err}', file=error_log)
+                finally:
+                    progress_text_label.config(text=f'Messages Sent: {count}/{len(cp_data)}')
+                    canvas.update()
+
+            send_customer_text(cust_txt)
+            if ph_2:
+                send_customer_text(
+                    Database.SMS.CustomerText(phone=ph_2, cust_no=cust_no, points=pts, category=cat, name=name)
+                )
 
         completed_message = (
             f'Process complete!\n'
