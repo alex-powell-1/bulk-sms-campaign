@@ -1,5 +1,6 @@
 creds.py
 custom.py
+config_file.py
 images/*
 .idea/
 __pycache__/
