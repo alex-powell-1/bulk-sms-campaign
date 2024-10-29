@@ -2,10 +2,9 @@ import creds
 import pyodbc
 from pyodbc import ProgrammingError, Error
 import time
-from utilities import PhoneNumber, log_sms_activity
-from error_handler import SMSErrorHandler
+from utilities import PhoneNumber
 
-from config_file import config_data as config
+from error_handler import logger
 
 verbose = False
 
@@ -65,6 +64,26 @@ class Database:
 
     class SMS:
         ORIGIN = creds.origin
+
+        def log_sms_activity(
+            origin: str,
+            campaign: str,
+            phone: str,
+            cust_no: str,
+            name: str,
+            category: str,
+            event_type: str,
+            message: str,
+        ):
+            query = f"""
+            INSERT INTO {creds.sms_activity_table} (ORIGIN, CAMPAIGN, PHONE, CUST_NO, NAME, CATEGORY, EVENT_TYPE, MESSAGE)
+            VALUES ('{origin}', '{campaign}', '{phone}', '{cust_no}', '{name}', '{category}', '{event_type}', '{message}')"""
+            response = Database.query(query)
+            if response['code'] != 200:
+                logger.error(
+                    f'Error inserting {event_type} event for {phone}. Response: {response}',
+                    origin='log_sms_activity',
+                )
 
         class CustomerText:
             def __init__(self, phone, cust_no=None, name=None, points=None, category=None):
@@ -153,12 +172,12 @@ class Database:
             if response['code'] == 200:
                 if verbose:
                     if direction == 'OUTBOUND':
-                        SMSErrorHandler.logger.success(f'SMS sent to {to_phone} added to Database.')
+                        logger.log(f'SMS sent to {to_phone} added to Database.')
                     else:
-                        SMSErrorHandler.logger.success(f'SMS received from {from_phone} added to Database.')
+                        logger.log(f'SMS received from {from_phone} added to Database.')
             else:
                 error = f'Error adding SMS sent to {to_phone} to Middleware. \nQuery: {query}\nResponse: {response}'
-                SMSErrorHandler.error_handler.add_error_v(error=error, origin='insert_sms')
+                logger.error(error=error, origin='insert_sms')
 
         @staticmethod
         def move_phone_1_to_landline(customer_text: CustomerText):
@@ -178,17 +197,17 @@ class Database:
 
                 response = Database.query(query)
                 if response['code'] != 200:
-                    SMSErrorHandler.error_handler.add_error_v(
+                    logger.error(
                         error=f'Error inserting move_phone_1_to_landline event for {customer_text.phone}. Response: {response}',
                         origin='move_phone_1_to_landline',
                     )
             elif response['code'] == 201:
                 """No rows affected"""
-                SMSErrorHandler.error_handler.add_error_v(
+                logger.error(
                     error=f'No target phone found for {customer_text.phone}', origin='move_phone_1_to_landline'
                 )
             else:
-                SMSErrorHandler.error_handler.add_error_v(
+                logger.error(
                     error=f'Error moving {customer_text.phone} to landline. Response: {response}',
                     origin='move_phone_1_to_landline',
                 )
@@ -218,7 +237,7 @@ class Database:
                     if response['code'] == 200:
                         column_str = 'SMS_1_IS_SUB' if responseIndex == 0 else 'SMS_2_IS_SUB'
 
-                        log_sms_activity(
+                        Database.SMS.log_sms_activity(
                             Database.SMS.ORIGIN,
                             customer_text.campaign,
                             phone,
@@ -234,19 +253,13 @@ class Database:
                         errors += 1
 
                 if no_rows > 1:
-                    SMSErrorHandler.error_handler.add_error_v(
-                        error=f'Error subscribing {phone}. Response: {responses}', origin='subscribe_sms'
-                    )
+                    logger.error(error=f'Error subscribing {phone}. Response: {responses}', origin='subscribe_sms')
 
                 if errors > 1:
-                    SMSErrorHandler.error_handler.add_error_v(
-                        error=f'Error subscribing {phone}. Response: {responses}', origin='subscribe_sms'
-                    )
+                    logger.error(error=f'Error subscribing {phone}. Response: {responses}', origin='subscribe_sms')
 
             except Exception as err:
-                SMSErrorHandler.error_handler.add_error_v(
-                    error=f'Error subscribing {phone}. Response: {err}', origin='subscribe_sms'
-                )
+                logger.error(error=f'Error subscribing {phone}. Response: {err}', origin='subscribe_sms')
 
         @staticmethod
         def unsubscribe(customer_text: CustomerText):
@@ -273,7 +286,7 @@ class Database:
                     if response['code'] == 200:
                         column_str = 'SMS_1_IS_SUB' if responseIndex == 0 else 'SMS_2_IS_SUB'
 
-                        log_sms_activity(
+                        Database.SMS.log_sms_activity(
                             Database.SMS.ORIGIN,
                             customer_text.campaign,
                             phone,
@@ -289,19 +302,17 @@ class Database:
                         errors += 1
 
                 if no_rows > 1:
-                    SMSErrorHandler.error_handler.add_error_v(
+                    logger.error(
                         error=f'Error unsubscribing {phone}. Response: {responses}', origin='unsubscribe_sms'
                     )
 
                 if errors > 1:
-                    SMSErrorHandler.error_handler.add_error_v(
+                    logger.error(
                         error=f'Error unsubscribing {phone}. Response: {responses}', origin='unsubscribe_sms'
                     )
 
             except Exception as err:
-                SMSErrorHandler.error_handler.add_error_v(
-                    error=f'Error unsubscribing {phone}. Response: {err}', origin='unsubscribe_sms'
-                )
+                logger.error(error=f'Error unsubscribing {phone}. Response: {err}', origin='unsubscribe_sms')
 
             # query = f"""
             # UPDATE AR_CUST
@@ -316,16 +327,16 @@ class Database:
             #     'Unsubscribe', 'SET {creds.sms_subscribe_status} = N')"""
             #     response = Database.query(query)
             #     if response['code'] != 200:
-            #         SMSErrorHandler.error_handler.add_error_v(
+            #         logger.error(
             #             f'Error inserting unsubscribe event for {phone}. Response: {response}'
             #         )
             # elif response['code'] == 201:
             #     """No rows affected"""
-            #     SMSErrorHandler.error_handler.add_error_v(
+            #     logger.error(
             #         error=f'No target phone found for {phone}', origin='unsubscribe_sms'
             #     )
             # else:
-            #     SMSErrorHandler.error_handler.add_error_v(
+            #     logger.error(
             #         error=f'Error unsubscribing {phone} from SMS. Response: {response}', origin='unsubscribe_sms'
             #     )
 

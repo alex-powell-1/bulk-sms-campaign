@@ -5,7 +5,7 @@ from idlelib.redirector import WidgetRedirector
 from tkinter import Listbox, IntVar, Checkbutton, messagebox, END, filedialog
 from tkinter.messagebox import showinfo
 from datetime import datetime
-
+from error_handler import logger
 import pandas
 import twilio.base.exceptions
 from twilio.rest import Client
@@ -17,7 +17,6 @@ from creds import account_sid, auth_token
 from database import Database
 from utilities import PhoneNumber
 from traceback import print_exc as tb
-from error_handler import SMSErrorHandler
 
 
 #   ___ __  __ ___    ___   _   __  __ ___  _   ___ ___ _  _ ___
@@ -234,7 +233,7 @@ def send_text():
                 if cust_txt.phone == 'error':
                     cust_txt.response_text = 'Invalid phone'
                     Database.SMS.insert(customer_text=cust_txt)
-                    continue
+                    return
 
                 elif test_mode():
                     cust_txt.sid = 'TEST'
