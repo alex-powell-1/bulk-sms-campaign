@@ -208,6 +208,7 @@ def send_text():
         # total_messages_sent will track successful messages
         total_messages_sent = 0
         # count will track all iterations through loop, successful or not
+        global count
         count = 0
 
         client = Client(account_sid, auth_token)
@@ -256,7 +257,7 @@ def send_text():
 
                     # Catch Errors
                     except twilio.base.exceptions.TwilioRestException as err:
-                        SMSErrorHandler.error_handler.add_error(
+                        logger.error(
                             error=f'Phone Number: {cust_txt.phone}, Code: {err.code}, Message:{err.msg}',
                             origin='SMS-Campaigns->send_text()',
                         )
@@ -275,7 +276,7 @@ def send_text():
                         sys.exit()
 
                     except Exception as err:
-                        SMSErrorHandler.error_handler.add_error(
+                        logger.error(
                             error=f'Uncaught Exception: {err}', origin='SMS-Campaigns->send_text()', traceback=tb()
                         )
                         cust_txt.response_text = str(err)
@@ -285,7 +286,9 @@ def send_text():
                         cust_txt.sid = twilio_message.sid
                         total_messages_sent += 1
 
+                global count
                 count += 1
+
                 cust_txt.count = f'{count}/{len(cp_data)}'
 
                 try:
