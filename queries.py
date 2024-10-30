@@ -16,18 +16,13 @@ standard_filter = """
 (SMS_1_IS_SUB = 'Y' AND PHONE_1 IS NOT NULL) or (SMS_2_IS_SUB = 'Y' and PHONE_2 IS NOT NULL)
 """
 
-# Alex Powell Only
+# SMS Test Group
 test_group_1 = """
 SELECT CUST_NO, NAM, PHONE_1, PHONE_2, LOY_PTS_BAL, CATEG_COD
 FROM AR_CUST
-WHERE PHONE_1 = '828-234-1265'
+WHERE IS_SMS_TESTER = 'Y'
 """
-# Alex Powell, Brandon Settlemyre, Michelle Settlemyre, Beth Lane
-test_group_2 = """
-SELECT CUST_NO, NAM, PHONE_1, PHONE_2, LOY_PTS_BAL, CATEG_COD
-FROM AR_CUST
-WHERE PHONE_1 = '828-234-1265' OR PHONE_1 = '828-390-8030' OR PHONE_1 = '828-403-3317' OR PHONE_1 = '704-488-8239'
-"""
+
 # All Retail Customers
 retail_all = f"""
 SELECT CUST_NO, NAM, PHONE_1, PHONE_2, LOY_PTS_BAL, CATEG_COD

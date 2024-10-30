@@ -5,18 +5,34 @@ from idlelib.redirector import WidgetRedirector
 from tkinter import Listbox, IntVar, Checkbutton, messagebox, END, filedialog
 from tkinter.messagebox import showinfo
 from datetime import datetime
-from error_handler import logger
+import os
 import pandas
 import twilio.base.exceptions
 from twilio.rest import Client
 
-import creds
-import custom
 import queries
-from creds import account_sid, auth_token
 from database import Database
 from utilities import PhoneNumber
 from traceback import print_exc as tb
+from creds import Twilio, Company, Logs
+from error_handler import logger
+
+
+# Color Pallet
+DARK_GREEN = '#3A4D39'
+MEDIUM_DARK_GREEN = '#4F6F52'
+MEDIUM_GREEN = '#739072'
+BACKGROUND_COLOR = '#ECE3CE'
+
+application_title = f'{Company.name} Text Messaging'
+header_label_text = f'{Company.name}: '
+
+
+# Messaging
+header_text = f'{Company.name}: '
+
+# Graphics
+logo = './images/logo.png'
 
 
 #   ___ __  __ ___    ___   _   __  __ ___  _   ___ ___ _  _ ___
@@ -26,12 +42,10 @@ from traceback import print_exc as tb
 #
 # Author: Alex Powell
 # GUI version. To run on schedule, please use CLIVersion.py
-version = 1.3
-# Release Notes: This version adds writing to database for each message sent.
-# Need to add sending to CONTCT_1 (if exists).
+
 
 TEST_MODE = False
-ORIGIN = creds.origin
+ORIGIN = 'MASS_CAMPAIGN'
 csv_data_dict = {}
 
 
@@ -40,19 +54,18 @@ def select_file():
     filetypes = (('csv files', '*.csv'), ('All files', '*.*'))
 
     cp_data = filedialog.askopenfilename(
-        title='Open a CSV', initialdir=creds.initial_directory, filetypes=filetypes
+        title='Open a CSV', initialdir=f'{os.path.expanduser('~')}/Desktop', filetypes=filetypes
     )
 
     # Read file
     csv_data = pandas.read_csv(cp_data)
     global csv_data_dict
     csv_data_dict = csv_data.to_dict('records')
+
     # Format phone number
     for customer in csv_data_dict:
-        phone_1 = customer['PHONE_1']
-        customer['PHONE_1'] = PhoneNumber(str(phone_1)).to_twilio()
-        phone_2 = customer['PHONE_2']
-        customer['PHONE_2'] = PhoneNumber(str(phone_2)).to_twilio()
+        customer['PHONE_1'] = PhoneNumber(str(customer['PHONE_1'])).to_twilio()
+        customer['PHONE_2'] = PhoneNumber(str(customer['PHONE_2'])).to_twilio()
 
     # Show first person's info
     try:
@@ -77,7 +90,8 @@ def segment_length():
     try:
         segment = listbox.get(listbox.curselection())
         sql_query = segment_dict[segment]
-        messages_to_send = len(Database.query(sql_query))
+        sql_response = Database.query(sql_query)
+        messages_to_send = len(sql_response)
         if messages_to_send < 1:
             list_size.config(text='List is empty.')
         elif messages_to_send == 1:
@@ -111,11 +125,9 @@ def create_custom_message(customer: Database.SMS.CustomerText, message):
 def send_text():
     # Get Listbox Value, Present Message Box with Segment
     segment = ''
-    message_script = custom.header_text + message_box.get('1.0', END)
+    message_script = header_text + message_box.get('1.0', END)
     single_phone = ''
-    cp_data = [
-        {'CUST_NO': None, 'NAM': None, 'PHONE_1': None, 'PHONE_2': None, 'LOY_PTS_BAL': None, 'CATEG_COD': None}
-    ]
+    cp_data = {}
 
     # ------- Validate User Inputs -------- #
 
@@ -177,6 +189,7 @@ def send_text():
         if segment_checkbutton_used() == 1:
             sql_query = segment_dict[segment]
             cp_data = Database.query(sql_query)
+            print(cp_data)
             if cp_data is None:
                 messagebox.showerror(
                     title='Error!', message='There was an error with the SQL query. Please try again.'
@@ -203,15 +216,24 @@ def send_text():
 
         # ----------DATA FOR SINGLE PHONE---------#
         elif single_number_checkbutton_used() == 1:
-            cp_data['PHONE_1'] = single_phone
+            cp_data = [
+                {
+                    'CUST_NO': '',
+                    'NAM': '',
+                    'PHONE_1': single_phone,
+                    'PHONE_2': '',
+                    'LOY_PTS_BAL': 0,
+                    'CATEG_COD': '',
+                }
+            ]
 
         # total_messages_sent will track successful messages
         total_messages_sent = 0
+
         # count will track all iterations through loop, successful or not
-        global count
         count = 0
 
-        client = Client(account_sid, auth_token)
+        client = Client(Twilio.sid, Twilio.token)
 
         campaign = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -220,91 +242,80 @@ def send_text():
             cust_no = customer['CUST_NO']
             name = customer['NAM']
             ph_1 = customer['PHONE_1']
-            ph_2 = customer['PHONE_2']
             pts = customer['LOY_PTS_BAL']
             cat = customer['CATEG_COD']
 
-            cust_txt = Database.SMS.CustomerText(phone=ph_1, cust_no=cust_no, points=pts, category=cat, name=name)
+            cust = Database.SMS.CustomerText(phone=ph_1, cust_no=cust_no, points=pts, category=cat, name=name)
+            cust.message = create_custom_message(cust, message_script)
+            cust.campaign = campaign
 
-            def send_customer_text(cust_txt):
-                cust_txt.message = create_custom_message(cust_txt, message_script)
-                cust_txt.campaign = campaign
+            # Filter out any phone errors
+            if cust.phone == 'error':
+                cust.response_text = 'Invalid phone'
+                Database.SMS.insert(customer_text=cust)
+                continue
 
-                # Filter out any phone errors
-                if cust_txt.phone == 'error':
-                    cust_txt.response_text = 'Invalid phone'
-                    Database.SMS.insert(customer_text=cust_txt)
-                    return
+            elif test_mode():
+                cust.sid = 'TEST'
+                total_messages_sent += 1
 
-                elif test_mode():
-                    cust_txt.sid = 'TEST'
+            else:
+                try:
+                    if photo_checkbutton_used():
+                        cust.media = photo_input.get()
+                        twilio_message = client.messages.create(
+                            from_=Twilio.phone_number, media_url=[cust.media], to=cust.phone, body=cust.message
+                        )
+                    else:
+                        twilio_message = client.messages.create(
+                            from_=Twilio.phone_number, to=cust.phone, body=cust.message
+                        )
+
+                # Catch Errors
+                except twilio.base.exceptions.TwilioRestException as err:
+                    logger.error(
+                        error=f'Phone Number: {cust.phone}, Code: {err.code}, Message:{err.msg}',
+                        origin='SMS-Campaigns->send_text()',
+                    )
+                    cust.response_code = err.code
+                    cust.response_text = err.msg
+
+                    if err.code == 21614:
+                        # From Twilio: You have attempted to send a SMS with a 'To' number that is not a valid
+                        # mobile number. It is likely that the number is a landline number or is an invalid number.
+                        Database.SMS.move_phone_1_to_landline(customer_text=cust)
+
+                    elif err.code == 21610:  # Previously unsubscribed
+                        Database.SMS.unsubscribe(customer_text=cust)
+
+                except KeyboardInterrupt:
+                    sys.exit()
+
+                except Exception as err:
+                    logger.error(
+                        error=f'Uncaught Exception: {err}', origin='SMS-Campaigns->send_text()', traceback=tb()
+                    )
+                    cust.response_text = str(err)
+
+                # Success
+                else:
+                    cust.sid = twilio_message.sid
                     total_messages_sent += 1
 
-                else:
-                    try:
-                        if photo_checkbutton_used():
-                            cust_txt.media = photo_input.get()
-                            twilio_message = client.messages.create(
-                                from_=creds.TWILIO_PHONE_NUMBER,
-                                media_url=[cust_txt.media],
-                                to=cust_txt.phone,
-                                body=cust_txt.message,
-                            )
-                        else:
-                            twilio_message = client.messages.create(
-                                from_=creds.TWILIO_PHONE_NUMBER, to=cust_txt.phone, body=cust_txt.message
-                            )
+            count += 1
+            cust.count = f'{count}/{len(cp_data)}'
 
-                    # Catch Errors
-                    except twilio.base.exceptions.TwilioRestException as err:
-                        logger.error(
-                            error=f'Phone Number: {cust_txt.phone}, Code: {err.code}, Message:{err.msg}',
-                            origin='SMS-Campaigns->send_text()',
-                        )
-                        cust_txt.response_code = err.code
-                        cust_txt.response_text = err.msg
-
-                        if err.code == 21614:
-                            # From Twilio: You have attempted to send a SMS with a 'To' number that is not a valid
-                            # mobile number. It is likely that the number is a landline number or is an invalid number.
-                            Database.SMS.move_phone_1_to_landline(customer_text=cust_txt)
-
-                        elif err.code == 21610:  # Previously unsubscribed
-                            Database.SMS.unsubscribe(cust_txt)
-
-                    except KeyboardInterrupt:
-                        sys.exit()
-
-                    except Exception as err:
-                        logger.error(
-                            error=f'Uncaught Exception: {err}', origin='SMS-Campaigns->send_text()', traceback=tb()
-                        )
-                        cust_txt.response_text = str(err)
-
-                    # Success
-                    else:
-                        cust_txt.sid = twilio_message.sid
-                        total_messages_sent += 1
-
-                global count
-                count += 1
-
-                cust_txt.count = f'{count}/{len(cp_data)}'
-
-                try:
-                    Database.SMS.insert(cust_txt)
-                except Exception as err:
-                    with open(creds.error_log, 'a') as error_log:
-                        print(f'Log Error: {err}', file=error_log)
-                finally:
-                    progress_text_label.config(text=f'Messages Sent: {count}/{len(cp_data)}')
-                    canvas.update()
-
-            send_customer_text(cust_txt)
-            if ph_2:
-                send_customer_text(
-                    Database.SMS.CustomerText(phone=ph_2, cust_no=cust_no, points=pts, category=cat, name=name)
+            try:
+                Database.SMS.insert(cust)
+            except Exception as err:
+                logger.error(
+                    error=f'Error inserting into database: {err}',
+                    origin='SMS-Campaigns->send_text()',
+                    traceback=tb(),
                 )
+            finally:
+                progress_text_label.config(text=f'Messages Sent: {count}/{len(cp_data)}')
+                canvas.update()
 
         completed_message = (
             f'Process complete!\n'
@@ -319,8 +330,8 @@ def send_text():
 
 # ---------------------------- UI SETUP ------------------------------- #
 window = tkinter.Tk()
-window.title(custom.application_title)
-window.config(padx=30, pady=10, background=custom.BACKGROUND_COLOR)
+window.title(application_title)
+window.config(padx=30, pady=10, background=BACKGROUND_COLOR)
 
 
 def center_window(width=410, height=950):
@@ -456,26 +467,22 @@ def test_mode() -> bool:
 
 
 def view_log():
-    subprocess.Popen(f'explorer /open, {creds.log_directory}')
+    subprocess.Popen(f'explorer /open, {Logs.sms}')
 
 
 # Logo
 canvas = tkinter.Canvas(
-    width=350,
-    height=172,
-    background=custom.BACKGROUND_COLOR,
-    highlightcolor=custom.BACKGROUND_COLOR,
-    highlightthickness=0,
+    width=350, height=172, background=BACKGROUND_COLOR, highlightcolor=BACKGROUND_COLOR, highlightthickness=0
 )
 
-logo = tkinter.PhotoImage(file=custom.logo)
+logo = tkinter.PhotoImage(file=logo)
 
 canvas.create_image(175, 86, image=logo)
 canvas.grid(column=0, row=0, pady=3, columnspan=3)
 
 # SMS Text Messaging Sub Title
 website_label = tkinter.Label(
-    text='SMS Text Messaging', font=('Arial', 12), fg=custom.MEDIUM_DARK_GREEN, background=custom.BACKGROUND_COLOR
+    text='SMS Text Messaging', font=('Arial', 12), fg=MEDIUM_DARK_GREEN, background=BACKGROUND_COLOR
 )
 website_label.grid(column=0, row=1, columnspan=3, pady=5)
 
@@ -487,7 +494,7 @@ single_number_checkbox = Checkbutton(
     variable=single_number_checkbox_state,
     command=single_number_checkbutton_used,
     fg='black',
-    background=custom.BACKGROUND_COLOR,
+    background=BACKGROUND_COLOR,
 )
 single_number_checkbox_state.get()
 single_number_checkbox.grid(column=0, row=2, columnspan=3, pady=0)
@@ -504,14 +511,14 @@ csv_checkbox = Checkbutton(
     variable=csv_checkbox_state,
     command=csv_checkbutton_used,
     fg='black',
-    background=custom.BACKGROUND_COLOR,
+    background=BACKGROUND_COLOR,
 )
 csv_checkbox_state.get()
 csv_checkbox.grid(column=0, row=4, columnspan=3, pady=0)
 
 # File open dialog
 open_csv_file_button = tkinter.Button(
-    text='Import CSV', font=('Arial', 10), command=select_file, highlightbackground=custom.BACKGROUND_COLOR
+    text='Import CSV', font=('Arial', 10), command=select_file, highlightbackground=BACKGROUND_COLOR
 )
 open_csv_file_button.config(state='disabled')
 open_csv_file_button.grid(row=5, column=0, columnspan=3, pady=3)
@@ -524,7 +531,7 @@ segment_checkbox = Checkbutton(
     variable=segment_checkbox_state,
     command=segment_checkbutton_used,
     fg='black',
-    background=custom.BACKGROUND_COLOR,
+    background=BACKGROUND_COLOR,
 )
 segment_checkbox_state.get()
 segment_checkbox.grid(column=0, row=6, columnspan=3, pady=3)
@@ -534,8 +541,7 @@ listbox = Listbox(
     height=6, width=25, highlightcolor='green', exportselection=False, font=('Arial', 10), justify='center'
 )
 segment_dict = {
-    'Single Test': queries.test_group_1,
-    'Management Test Group': queries.test_group_2,
+    'SMS Test Group': queries.test_group_1,
     'Wholesale Customers': queries.wholesale_all,
     'Retail Customers: All': queries.retail_all,
     "Yesterday's Shoppers": queries.yesterday_purchases,
@@ -575,30 +581,28 @@ calculate_size_button = tkinter.Button(
     text='Calculate List Size',
     command=segment_length,
     font=('Arial', 10),
-    background=custom.BACKGROUND_COLOR,
-    highlightbackground=custom.BACKGROUND_COLOR,
+    background=BACKGROUND_COLOR,
+    highlightbackground=BACKGROUND_COLOR,
 )
 calculate_size_button.config(state='disabled')
 calculate_size_button.grid(row=8, column=0, columnspan=3, pady=5)
 
-list_size = tkinter.Label(text='', font=('Arial', 9), fg=custom.MEDIUM_GREEN, background=custom.BACKGROUND_COLOR)
+list_size = tkinter.Label(text='', font=('Arial', 9), fg=MEDIUM_GREEN, background=BACKGROUND_COLOR)
 list_size.grid(column=0, row=9, columnspan=3, pady=2)
 
 # Header Text Label
 header_text_label = tkinter.Label(
-    text='Header Text', font=('Arial', 9), fg=custom.MEDIUM_DARK_GREEN, background=custom.BACKGROUND_COLOR
+    text='Header Text', font=('Arial', 9), fg=MEDIUM_DARK_GREEN, background=BACKGROUND_COLOR
 )
 header_text_label.grid(column=0, row=10, columnspan=3, pady=0)
 
 # Header Label
-header_text_label = tkinter.Label(
-    text=custom.header_label_text, font=('Arial', 10), background=custom.BACKGROUND_COLOR
-)
+header_text_label = tkinter.Label(text=header_label_text, font=('Arial', 10), background=BACKGROUND_COLOR)
 header_text_label.grid(column=0, row=11, columnspan=3, pady=0)
 
 # Message Box
 message_label = tkinter.Label(
-    text='Message: ', font=('Arial', 10), fg=custom.MEDIUM_DARK_GREEN, background=custom.BACKGROUND_COLOR
+    text='Message: ', font=('Arial', 10), fg=MEDIUM_DARK_GREEN, background=BACKGROUND_COLOR
 )
 message_label.grid(column=0, row=12, columnspan=3, pady=3)
 message_box = tkinter.Text(window, width=35, height=4, wrap='word', font=('Arial', 12), fg='black')
@@ -610,7 +614,7 @@ message_box.insert(
 message_box.grid(row=13, column=0, columnspan=3, pady=2)
 
 # Length of Message
-user_label = tkinter.Label(text='Message Length: 20', font=('Arial', 12), background=custom.BACKGROUND_COLOR)
+user_label = tkinter.Label(text='Message Length: 20', font=('Arial', 12), background=BACKGROUND_COLOR)
 user_label.grid(column=0, row=14, columnspan=3, pady=3)
 
 # Picture Checkbox
@@ -622,7 +626,7 @@ picture_checkbox = Checkbutton(
     variable=checked_state,
     command=photo_checkbutton_used,
     fg='black',
-    background=custom.BACKGROUND_COLOR,
+    background=BACKGROUND_COLOR,
 )
 checked_state.get()
 picture_checkbox.grid(column=0, row=15, columnspan=3, pady=10)
@@ -631,7 +635,7 @@ photo_link_help_text = tkinter.Label(
     state='disabled',
     font=('Arial', 10, 'italic'),
     fg='grey',
-    background=custom.BACKGROUND_COLOR,
+    background=BACKGROUND_COLOR,
 )
 photo_link_help_text.grid(column=0, row=16, columnspan=3, pady=0)
 
@@ -643,11 +647,7 @@ photo_input.grid(row=17, column=0, columnspan=3, pady=10)
 
 # Send Button
 send_button = tkinter.Button(
-    text='Send',
-    command=send_text,
-    font=('Arial', 14),
-    fg=custom.DARK_GREEN,
-    highlightbackground=custom.BACKGROUND_COLOR,
+    text='Send', command=send_text, font=('Arial', 14), fg=DARK_GREEN, highlightbackground=BACKGROUND_COLOR
 )
 send_button.grid(row=18, column=0, columnspan=3, pady=5)
 
@@ -659,28 +659,23 @@ test_mode_checkbox = Checkbutton(
     variable=test_mode_checkbox_state,
     command=test_mode,
     fg='black',
-    background=custom.BACKGROUND_COLOR,
+    background=BACKGROUND_COLOR,
 )
 test_mode_checkbox_state.get()
 test_mode_checkbox.grid(column=0, row=19, columnspan=1, pady=0)
 
 # View Log
 log_button = tkinter.Button(
-    text='View Log', command=view_log, font=('Arial', 10), highlightbackground=custom.BACKGROUND_COLOR
+    text='View Log', command=view_log, font=('Arial', 10), highlightbackground=BACKGROUND_COLOR
 )
 log_button.grid(row=19, column=1, columnspan=1, pady=3)
 
-progress_text_label = tkinter.Label(
-    text='', font=('Arial', 10), background=custom.BACKGROUND_COLOR, fg=custom.MEDIUM_DARK_GREEN
-)
+progress_text_label = tkinter.Label(text='', font=('Arial', 10), background=BACKGROUND_COLOR, fg=MEDIUM_DARK_GREEN)
 progress_text_label.grid(column=0, row=21, columnspan=3, pady=0)
 
 # Version Number
 header_text_label = tkinter.Label(
-    text=f'      Version {version}',
-    font=('Arial', 9),
-    fg=custom.MEDIUM_DARK_GREEN,
-    background=custom.BACKGROUND_COLOR,
+    text='      Version 1.3.01', font=('Arial', 9), fg=MEDIUM_DARK_GREEN, background=BACKGROUND_COLOR
 )
 header_text_label.grid(column=2, row=19, columnspan=1, pady=0)
 
