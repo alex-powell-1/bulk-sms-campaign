@@ -18,6 +18,8 @@ class PhoneNumber:
     @staticmethod
     def is_valid(phone_number) -> bool:
         """Validates a phone number using regex."""
+        if not phone_number:
+            return False
         pattern = r'(\+\d{1,3})?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}'
         if re.match(pattern, phone_number):
             return True

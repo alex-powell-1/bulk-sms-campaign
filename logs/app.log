@@ -1,0 +1,5 @@
+2024-10-30 15:47:30,994 - my_app_logger - ERROR - Error in send_text_thread: object of type 'int' has no len()
+2024-10-30 15:52:44,937 - my_app_logger - ERROR - Error in send_text_thread: expected string or bytes-like object, got 'NoneType'
+2024-10-30 15:53:57,808 - my_app_logger - ERROR - Error in send_text_thread: expected string or bytes-like object, got 'NoneType' None
+2024-10-30 16:16:11,294 - my_app_logger - ERROR - Error in send_text_thread: cannot schedule new futures after shutdown None
+2024-10-30 16:17:26,582 - my_app_logger - ERROR - Error in send_text_thread: cannot schedule new futures after shutdown None

@@ -16,7 +16,9 @@ from utilities import PhoneNumber
 from traceback import print_exc as tb
 from creds import Twilio, Company, Logs
 from error_handler import logger
-
+import concurrent.futures
+import threading
+import time
 
 # Color Pallet
 DARK_GREEN = '#3A4D39'
@@ -90,8 +92,14 @@ def segment_length():
     try:
         segment = listbox.get(listbox.curselection())
         sql_query = segment_dict[segment]
+        messages_to_send = 0
         sql_response = Database.query(sql_query)
-        messages_to_send = len(sql_response)
+        for customer in sql_response:
+            if customer[2] and customer[2] != 'error':
+                messages_to_send += 1
+            if customer[3] and customer[3] != 'error':
+                messages_to_send += 1
+
         if messages_to_send < 1:
             list_size.config(text='List is empty.')
         elif messages_to_send == 1:
@@ -121,211 +129,177 @@ def create_custom_message(customer: Database.SMS.CustomerText, message):
     return message
 
 
-# ---------------------------- TWILIO TEXT API ------------------------------ #
 def send_text():
     # Get Listbox Value, Present Message Box with Segment
-    segment = ''
     message_script = header_text + message_box.get('1.0', END)
-    single_phone = ''
-    cp_data = {}
 
-    # ------- Validate User Inputs -------- #
-
-    if segment_checkbutton_used() == 1:
-        # global segment
+    def send_text_thread():
         try:
-            segment = listbox.get(listbox.curselection())
-        except tkinter.TclError:
-            messagebox.showerror(title='Error!', message='You did not pick a selection. Try again.')
-            confirm_box = False
-        else:
-            confirm_box = messagebox.askokcancel(
-                title='Ready to Send?',
-                message=f'These are the details entered:'
-                f' \n\nMessage: {message_script}\n\n'
-                f'Sent to: {segment}',
-            )
+            # ----------GET DATA FROM SQL------------#
+            if segment_checkbutton_used() == 1:
+                segment = listbox.get(listbox.curselection())
+                sql_query = segment_dict[segment]
+                cp_data = Database.query(sql_query)
+                if cp_data is None:
+                    messagebox.showerror(
+                        title='Error!', message='There was an error with the SQL query. Please try again.'
+                    )
+                    return
+                else:
+                    cp_data = [
+                        {
+                            'CUST_NO': customer[0],
+                            'NAM': customer[1],
+                            'PHONE_1': PhoneNumber(customer[2]).to_twilio() if customer[2] else '',
+                            'PHONE_2': PhoneNumber(customer[3]).to_twilio() if customer[3] else '',
+                            'LOY_PTS_BAL': customer[4],
+                            'CATEG_COD': customer[5],
+                        }
+                        for customer in cp_data
+                    ]
 
-    elif single_number_checkbutton_used() == 1:
-        original_number = single_number_input.get()
-        single_phone = PhoneNumber(original_number).to_twilio()
-        if len(single_phone) == 12:
-            confirm_box = messagebox.askokcancel(
-                title='Ready to Send?',
-                message=f'These are the details entered:'
-                f' \n\nMessage: {message_script}\n\n'
-                f'Sent to: {original_number}',
-            )
-        else:
-            messagebox.showerror(title='error', message='Invalid phone number. Please try again.')
-            confirm_box = False
+            # ------------------OR-------------------#
 
-    elif csv_checkbutton_used() == 1:
-        if csv_data_dict == {}:
-            messagebox.showerror(
-                title='CSV Error',
-                message='Please select a csv file with the following header:\n'
-                'CUST_NO,NAM,PHONE_1,LOY_PTS_BAL,CATEG_COD\n'
-                '(No spaces allowed!)',
-            )
-            confirm_box = False
+            # -------GET DATA FROM CSV---------#
+            elif csv_checkbutton_used() == 1:
+                cp_data = csv_data_dict
 
-        else:
-            confirm_box = messagebox.askokcancel(
-                title='Ready to Send?',
-                message=f'These are the details entered:'
-                f' \n\nMessage: {message_script}\n\n'
-                f'Sent to: CSV List\n'
-                f'Total Messages to Send: '
-                f'{len(csv_data_dict)}',
-            )
-    else:
-        confirm_box = messagebox.showinfo(title='Error', message='You did not choose a selection. Try again.')
-
-    if confirm_box and (
-        segment_checkbutton_used() == 1 or single_number_checkbutton_used() == 1 or csv_checkbutton_used() == 1
-    ):
-        # ----------GET DATA FROM SQL------------#
-        if segment_checkbutton_used() == 1:
-            sql_query = segment_dict[segment]
-            cp_data = Database.query(sql_query)
-            print(cp_data)
-            if cp_data is None:
-                messagebox.showerror(
-                    title='Error!', message='There was an error with the SQL query. Please try again.'
-                )
-                return
-            else:
+            # ----------DATA FOR SINGLE PHONE---------#
+            elif single_number_checkbutton_used() == 1:
+                single_phone = PhoneNumber(single_number_input.get()).to_twilio()
                 cp_data = [
                     {
-                        'CUST_NO': customer[0],
-                        'NAM': customer[1],
-                        'PHONE_1': PhoneNumber(customer[2]).to_twilio(),
-                        'PHONE_2': PhoneNumber(customer[3]).to_twilio() if customer[3] else '',
-                        'LOY_PTS_BAL': customer[4],
-                        'CATEG_COD': customer[5],
+                        'CUST_NO': '',
+                        'NAM': '',
+                        'PHONE_1': single_phone,
+                        'PHONE_2': '',
+                        'LOY_PTS_BAL': 0,
+                        'CATEG_COD': '',
                     }
-                    for customer in cp_data
                 ]
 
-        # ------------------OR-------------------#
+            class MessageSender:
+                def __init__(self, cp_data: list[dict]):
+                    self.client = Client(Twilio.sid, Twilio.token)
+                    self.campaign = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    self.cp_data = cp_data
+                    self.messages_to_send: int = 0
+                    self.total_messages_sent: int = 0  # Successful messages
+                    self.count: int = 0  # All message attempts
+                    self.completed_message: str = ''
+                    self.get_messages_to_send()
 
-        # -------GET DATA FROM CSV---------#
-        elif csv_checkbutton_used() == 1:
-            cp_data = csv_data_dict
+                def get_messages_to_send(self):
+                    for customer in self.cp_data:
+                        if customer['PHONE_1'] and customer['PHONE_1'] != 'error':
+                            self.messages_to_send += 1
+                        if customer['PHONE_2'] and customer['PHONE_2'] != 'error':
+                            self.messages_to_send += 1
 
-        # ----------DATA FOR SINGLE PHONE---------#
-        elif single_number_checkbutton_used() == 1:
-            cp_data = [
-                {
-                    'CUST_NO': '',
-                    'NAM': '',
-                    'PHONE_1': single_phone,
-                    'PHONE_2': '',
-                    'LOY_PTS_BAL': 0,
-                    'CATEG_COD': '',
-                }
-            ]
+                def send_text(self):
+                    def send_helper(cust_txt: Database.SMS.CustomerText):
+                        print(f'Sending to {cust_txt.phone}')
+                        cust_txt.message = create_custom_message(cust_txt, message_script)
+                        cust_txt.campaign = self.campaign
+                        # Filter out any phone errors
 
-        # total_messages_sent will track successful messages
-        total_messages_sent = 0
+                        if cust_txt.phone == 'error':
+                            cust_txt.response_text = 'Invalid phone'
+                            Database.SMS.insert(customer_text=cust_txt)
+                            return
+                        elif test_mode():
+                            cust_txt.sid = 'TEST'
+                            self.total_messages_sent += 1
+                        else:
+                            try:
+                                if photo_checkbutton_used():
+                                    cust_txt.media = photo_input.get()
+                                    twilio_message = self.client.messages.create(
+                                        from_=Twilio.phone_number,
+                                        media_url=[cust_txt.media],
+                                        to=cust_txt.phone,
+                                        body=cust_txt.message,
+                                    )
+                                else:
+                                    twilio_message = self.client.messages.create(
+                                        from_=Twilio.phone_number, to=cust_txt.phone, body=cust_txt.message
+                                    )
+                            # Catch Errors
+                            except twilio.base.exceptions.TwilioRestException as err:
+                                logger.error(
+                                    f'Twilio Error: {err.code} - {err.msg} - {cust_txt.phone} - {cust_txt.message}'
+                                )
+                                cust_txt.response_code = err.code
+                                cust_txt.response_text = err.msg
+                                if err.code == 21614:
+                                    Database.SMS.move_phone_1_to_landline(customer_text=cust_txt)
+                                elif err.code == 21610:  # Previously unsubscribed
+                                    Database.SMS.unsubscribe(cust_txt)
+                            except KeyboardInterrupt:
+                                sys.exit()
+                            except Exception as err:
+                                logger.error(f'General Error: {tb()}')
+                                cust_txt.response_text = str(err)
+                            # Success
+                            else:
+                                cust_txt.sid = twilio_message.sid
+                                self.total_messages_sent += 1
 
-        # count will track all iterations through loop, successful or not
-        count = 0
+                        self.count += 1
+                        cust_txt.count = f'{self.count}/{self.messages_to_send}'
+                        Database.SMS.insert(cust_txt)
+                        progress_text_label.config(text=f'Messages Sent: {self.count}/{self.messages_to_send}')
+                        canvas.update()
 
-        client = Client(Twilio.sid, Twilio.token)
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        futures = []
+                        for i, customer in enumerate(self.cp_data):
+                            cust_no = customer['CUST_NO']
+                            name = customer['NAM']
+                            ph_1 = customer['PHONE_1']
+                            ph_2 = customer['PHONE_2']
+                            pts = customer['LOY_PTS_BAL']
+                            cat = customer['CATEG_COD']
 
-        campaign = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                            cust_txt = Database.SMS.CustomerText(
+                                phone=ph_1, cust_no=cust_no, points=pts, category=cat, name=name
+                            )
 
-        # BEGIN ITERATING THROUGH SUBSCRIBERS
-        for customer in cp_data:
-            cust_no = customer['CUST_NO']
-            name = customer['NAM']
-            ph_1 = customer['PHONE_1']
-            pts = customer['LOY_PTS_BAL']
-            cat = customer['CATEG_COD']
+                            futures.append(executor.submit(send_helper, cust_txt))
 
-            cust = Database.SMS.CustomerText(phone=ph_1, cust_no=cust_no, points=pts, category=cat, name=name)
-            cust.message = create_custom_message(cust, message_script)
-            cust.campaign = campaign
+                            if ph_2:
+                                cust_txt_2 = Database.SMS.CustomerText(
+                                    phone=ph_2, cust_no=cust_no, points=pts, category=cat, name=name
+                                )
+                                futures.append(executor.submit(send_helper, cust_txt_2))
 
-            # Filter out any phone errors
-            if cust.phone == 'error':
-                cust.response_text = 'Invalid phone'
-                Database.SMS.insert(customer_text=cust)
-                continue
+                            # Rate limit to 20 tasks per second
+                            if (i + 1) % 20 == 0:
+                                time.sleep(1)
 
-            elif test_mode():
-                cust.sid = 'TEST'
-                total_messages_sent += 1
+                        # Wait for all futures to complete
+                        concurrent.futures.wait(futures)
 
-            else:
-                try:
-                    if photo_checkbutton_used():
-                        cust.media = photo_input.get()
-                        twilio_message = client.messages.create(
-                            from_=Twilio.phone_number, media_url=[cust.media], to=cust.phone, body=cust.message
-                        )
-                    else:
-                        twilio_message = client.messages.create(
-                            from_=Twilio.phone_number, to=cust.phone, body=cust.message
-                        )
-
-                # Catch Errors
-                except twilio.base.exceptions.TwilioRestException as err:
-                    logger.error(
-                        error=f'Phone Number: {cust.phone}, Code: {err.code}, Message:{err.msg}',
-                        origin='SMS-Campaigns->send_text()',
+                    self.completed_message = (
+                        f'Process complete!\n'
+                        f'{self.total_messages_sent} messages sent. \n'
+                        f'{self.messages_to_send - self.total_messages_sent} messages failed. \n\n'
+                        f'Would you like to see the log?'
                     )
-                    cust.response_code = err.code
-                    cust.response_text = err.msg
 
-                    if err.code == 21614:
-                        # From Twilio: You have attempted to send a SMS with a 'To' number that is not a valid
-                        # mobile number. It is likely that the number is a landline number or is an invalid number.
-                        Database.SMS.move_phone_1_to_landline(customer_text=cust)
+                    if messagebox.askyesno(title='Completed', message=self.completed_message):
+                        view_log()
 
-                    elif err.code == 21610:  # Previously unsubscribed
-                        Database.SMS.unsubscribe(customer_text=cust)
+            sender = MessageSender(cp_data)
+            sender.send_text()
 
-                except KeyboardInterrupt:
-                    sys.exit()
+        except Exception as e:
+            logger.error(f'Error in send_text_thread: {e} {tb()}')
+            messagebox.showerror(
+                title='Error', message='An error occurred while sending texts. Please check the log.'
+            )
 
-                except Exception as err:
-                    logger.error(
-                        error=f'Uncaught Exception: {err}', origin='SMS-Campaigns->send_text()', traceback=tb()
-                    )
-                    cust.response_text = str(err)
-
-                # Success
-                else:
-                    cust.sid = twilio_message.sid
-                    total_messages_sent += 1
-
-            count += 1
-            cust.count = f'{count}/{len(cp_data)}'
-
-            try:
-                Database.SMS.insert(cust)
-            except Exception as err:
-                logger.error(
-                    error=f'Error inserting into database: {err}',
-                    origin='SMS-Campaigns->send_text()',
-                    traceback=tb(),
-                )
-            finally:
-                progress_text_label.config(text=f'Messages Sent: {count}/{len(cp_data)}')
-                canvas.update()
-
-        completed_message = (
-            f'Process complete!\n'
-            f'{total_messages_sent} messages sent. \n'
-            f'{len(cp_data) - total_messages_sent} messages failed. \n\n'
-            f'Would you like to see the log?'
-        )
-
-        if messagebox.askyesno(title='Completed', message=completed_message):
-            view_log()
+    threading.Thread(target=send_text_thread).start()
 
 
 # ---------------------------- UI SETUP ------------------------------- #
