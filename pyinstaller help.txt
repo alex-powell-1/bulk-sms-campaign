@@ -1,1 +1,6 @@
+
+# Windowless
 pyinstaller main.py --onedir --noconsole --icon icon.ico
+
+# Otherwise---good for be debugging...
+pyinstaller main.py --onedir --icon icon.ico

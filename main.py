@@ -82,7 +82,7 @@ class MessageSender:
         self.count: int = 0  # All message attempts
         self.completed_message: str = ''
 
-    def send_text(self):
+    def send_texts(self):
         def send_helper(cust_txt: Text):
             print(f'Sending to {cust_txt.phone}')
 
@@ -109,6 +109,7 @@ class MessageSender:
             futures = []
 
             for i, text in enumerate(self.campaign.texts):
+                print(text)
                 progress.set(i / len(self.campaign.texts) * 100)
                 futures.append(executor.submit(send_helper, text))
 
@@ -253,7 +254,7 @@ def send_text():
 
     def send_text_thread():
         try:
-            sender.send_text()
+            sender.send_texts()
 
         except Exception as e:
             logger.error(f'Error in send_text_thread: {e} {tb()}')
@@ -262,6 +263,10 @@ def send_text():
             )
 
         else:
+            # Remove the progress bar
+            progress_bar.place_forget()
+
+            # Show a message box when the process is complete
             messagebox.showinfo(title='Completed', message=sender.completed_message)
 
     try:
