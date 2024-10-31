@@ -7,3 +7,6 @@ dist/
 build/
 .venv/
 .env
+logs/*
+sandbox.py
+output.csv

@@ -1,13 +1,14 @@
-import creds
 from creds import SQL, Table, Twilio
 import pyodbc
 from pyodbc import ProgrammingError, Error
 import time
 from utilities import PhoneNumber
-
+from models.texts import Text
+from models.customers import Customers
 from error_handler import logger
 
-verbose = False
+verbose = True
+ORIGIN = 'MASS CAMPAIGN'
 
 
 class Database:
@@ -63,46 +64,28 @@ class Database:
         connection.close()
         return sql_data if sql_data else None
 
-    class SMS:
-        def log_sms_activity(
-            campaign: str,
-            phone: str,
-            cust_no: str,
-            name: str,
-            category: str,
-            event_type: str,
-            message: str,
-            origin: str = 'MASS CAMPAIGN',
-        ):
-            query = f"""
-            INSERT INTO {creds.sms_activity_table} (ORIGIN, CAMPAIGN, PHONE, CUST_NO, NAME, CATEGORY, EVENT_TYPE, MESSAGE)
-            VALUES ('{origin}', '{campaign}', '{phone}', '{cust_no}', '{name}', '{category}', '{event_type}', '{message}')"""
-            response = Database.query(query)
-            if response['code'] != 200:
-                logger.error(
-                    f'Error inserting {event_type} event for {phone}. Response: {response}',
-                    origin='log_sms_activity',
+    def get_customers(query: str) -> Customers:
+        response = Database.query(query)
+
+        if response:
+            result = []
+            for x in response:
+                result.append(
+                    {
+                        'CUST_NO': x[0],
+                        'CUST_NAM_TYP': x[1],
+                        'NAM': x[2],
+                        'PHONE_1': x[3],
+                        'CONTCT_2': x[4],
+                        'PHONE_2': x[5],
+                        'LOY_PTS_BAL': x[6],
+                        'CATEG_COD': x[7],
+                    }
                 )
+            return Customers(result)
+        return []
 
-        class CustomerText:
-            def __init__(self, phone, cust_no=None, name=None, points=None, category=None):
-                self.phone = phone
-                self.cust_no = cust_no or Database.Counterpoint.Customer.get_cust_no(self.phone)
-                self.name = name or Database.Counterpoint.Customer.get_name(self.cust_no)
-                self.first_name = self.name.split(' ')[0] or None
-                self.points = points or Database.Counterpoint.Customer.get_loyalty_balance(self.cust_no)
-                self.category = category or Database.Counterpoint.Customer.get_category(self.cust_no)
-                self.message = None
-                self.media = None
-                self.sid = None
-                self.response_code = None
-                self.response_text: str = None
-                self.count = None
-                self.campaign = None
-
-            def __str__(self):
-                return f'Customer {self.cust_no}: {self.name} - {self.phone}'
-
+    class SMS:
         @staticmethod
         def get(cust_no=None):
             if cust_no:
@@ -117,21 +100,20 @@ class Database:
             return Database.query(query)
 
         @staticmethod
-        def insert(customer_text: CustomerText):
+        def insert(customer_text: Text):
             campaign = customer_text.campaign
             from_phone = Twilio.phone_number
             to_phone = customer_text.phone
-            cust_no = customer_text.cust_no
-            name = customer_text.name
-            category = customer_text.category
-            body = customer_text.message
-            media = customer_text.media
+            cust_no = customer_text.cust_no or Database.Counterpoint.Customer.get_cust_no(to_phone)
+            name = customer_text.name or Database.Counterpoint.Customer.get_name(cust_no)
+            category = customer_text.category or Database.Counterpoint.Customer.get_category(cust_no)
+            body = customer_text.custom_message
+            media = customer_text.media_url
             sid = customer_text.sid
             error_code = customer_text.response_code
             error_message = customer_text.response_text
 
             username = 'Mass Campaign'
-            origin = 'MASS CAMPAIGN'
 
             if name:
                 name = name.replace("'", "''")
@@ -163,7 +145,7 @@ class Database:
             query = f"""
                 INSERT INTO {Table.sms} (ORIGIN, CAMPAIGN, DIRECTION, TO_PHONE, FROM_PHONE, CUST_NO, NAME, BODY, 
                 USERNAME, CATEGORY, MEDIA, SID, ERROR_CODE, ERROR_MESSAGE)
-                VALUES ('{origin}', {f"'{campaign}'" if campaign else 'NULL'}, '{direction}', '{to_phone}', '{from_phone}', 
+                VALUES ('{ORIGIN}', {f"'{campaign}'" if campaign else 'NULL'}, '{direction}', '{to_phone}', '{from_phone}', 
                 {f"'{cust_no}'" if cust_no else 'NULL'}, {f"'{name}'" if name else 'NULL'},'{body}', {f"'{username}'" if username else 'NULL'},
                 {f"'{category}'" if category else 'NULL'}, {f"'{media}'" if media else 'NULL'}, {f"'{sid}'" if sid else 'NULL'}, 
                 {f"'{error_code}'" if error_code else 'NULL'}, {f"'{error_message}'" if error_message else 'NULL'})
@@ -177,93 +159,58 @@ class Database:
                         logger.log(f'SMS received from {from_phone} added to Database.')
             else:
                 error = f'Error adding SMS sent to {to_phone} to Middleware. \nQuery: {query}\nResponse: {response}'
-                logger.error(error=error, origin='insert_sms')
+                logger.error(msg=error)
 
         @staticmethod
-        def move_phone_1_to_landline(customer_text: CustomerText):
+        def move_phone_to_landline(customer_text: Text):
             cp_phone = PhoneNumber(customer_text.phone).to_cp()
+
             move_landline_query = f"""
                 UPDATE AR_CUST
-                SET MBL_PHONE_1 = '{cp_phone}', PHONE_1 = NULL
-                WHERE PHONE_1 = '{cp_phone}'
+                SET MBL_PHONE_{customer_text.contact} = '{cp_phone}', PHONE_{customer_text.contact} = NULL
+                WHERE PHONE_{customer_text.contact} = '{cp_phone}'
             """
             response = Database.query(move_landline_query)
 
             if response['code'] == 200:
                 query = f"""
                 INSERT INTO {Table.sms_event} (ORIGIN, CAMPAIGN, PHONE, CUST_NO, NAME, CATEGORY, EVENT_TYPE, MESSAGE)
-                VALUES ('{Database.SMS.ORIGIN}', '{customer_text.campaign}', '{customer_text.phone}', '{customer_text.cust_no}', '{customer_text.name}', '{customer_text.category}', 
-                'Landline', 'SET MBL_PHONE_1 = {cp_phone}, SET PHONE_1 = NULL')"""
+                VALUES ('{ORIGIN}', '{customer_text.campaign}', '{customer_text.phone}', '{customer_text.cust_no}', '{customer_text.name}', '{customer_text.category}', 
+                'Landline', 'SET MBL_PHONE_{customer_text.contact} = {cp_phone}, SET PHONE_{customer_text.contact} = NULL')"""
 
                 response = Database.query(query)
                 if response['code'] != 200:
-                    logger.error(
-                        error=f'Error inserting move_phone_1_to_landline event for {customer_text.phone}. Response: {response}',
-                        origin='move_phone_1_to_landline',
-                    )
+                    logger.error(f'Error logging landline event for {customer_text.phone}. Response: {response}')
             elif response['code'] == 201:
                 """No rows affected"""
-                logger.error(
-                    error=f'No target phone found for {customer_text.phone}', origin='move_phone_1_to_landline'
-                )
+                logger.error(f'Error moving {customer_text.phone} to landline. Response: {response}')
+
             else:
-                logger.error(
-                    error=f'Error moving {customer_text.phone} to landline. Response: {response}',
-                    origin='move_phone_1_to_landline',
-                )
+                logger.error(f'Error moving {customer_text.phone} to landline. Response: {response}')
 
         @staticmethod
-        def unsubscribe(customer_text: CustomerText):
+        def unsubscribe(customer_text: Text):
             phone = PhoneNumber(customer_text.phone).to_cp()
-
-            query1 = f"""
+            query = f"""
             UPDATE AR_CUST
-            SET SMS_1_IS_SUB = 'N'
-            WHERE PHONE_1 = '{phone}'
+            SET SMS_{customer_text.contact}_IS_SUB = 'N'
+            WHERE PHONE_{customer_text.contact} = '{phone}'
             """
+            response = Database.query(query)
+            if response['code'] == 200:
+                query = f"""
+                INSERT INTO {Table.sms_event} (ORIGIN, CAMPAIGN, PHONE, CUST_NO, NAME, CATEGORY, EVENT_TYPE, MESSAGE)
+                VALUES ('{ORIGIN}', '{customer_text.campaign}', '{customer_text.phone}', '{customer_text.cust_no}', '{customer_text.name}', '{customer_text.category}', 
+                'Unsubscribe', 'SET SMS_{customer_text.contact}_IS_SUB = N')"""
 
-            query2 = f"""
-            UPDATE AR_CUST
-            SET SMS_2_IS_SUB = 'N'
-            WHERE PHONE_2 = '{phone}'
-            """
-
-            try:
-                responses = [Database.query(query1), Database.query(query2)]
-                no_rows = 0
-                errors = 0
-
-                for responseIndex, response in enumerate(responses):
-                    if response['code'] == 200:
-                        column_str = 'SMS_1_IS_SUB' if responseIndex == 0 else 'SMS_2_IS_SUB'
-
-                        Database.SMS.log_sms_activity(
-                            Database.SMS.ORIGIN,
-                            customer_text.campaign,
-                            phone,
-                            customer_text.cust_no,
-                            customer_text.name,
-                            customer_text.category,
-                            'Unsubscribe',
-                            f'SET {column_str} = N',
-                        )
-                    elif response['code'] == 201:
-                        no_rows += 1
-                    else:
-                        errors += 1
-
-                if no_rows > 1:
-                    logger.error(
-                        error=f'Error unsubscribing {phone}. Response: {responses}', origin='unsubscribe_sms'
-                    )
-
-                if errors > 1:
-                    logger.error(
-                        error=f'Error unsubscribing {phone}. Response: {responses}', origin='unsubscribe_sms'
-                    )
-
-            except Exception as err:
-                logger.error(error=f'Error unsubscribing {phone}. Response: {err}', origin='unsubscribe_sms')
+                response = Database.query(query)
+                if response['code'] != 200:
+                    logger.error(f'Error logging unsubscribe event for {customer_text.phone}. Response: {response}')
+            elif response['code'] == 201:
+                """No rows affected"""
+                logger.error(f'Error unsubscribing {customer_text.phone}. Response: {response}')
+            else:
+                logger.error(f'Error unsubscribing {customer_text.phone}. Response: {response}')
 
     class Counterpoint:
         class Customer:

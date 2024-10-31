@@ -20,6 +20,7 @@ class PhoneNumber:
         """Validates a phone number using regex."""
         if not phone_number:
             return False
+        phone_number = str(phone_number)
         pattern = r'(\+\d{1,3})?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}'
         if re.match(pattern, phone_number):
             return True

@@ -1,5 +1,4 @@
 import subprocess
-import sys
 import tkinter
 from idlelib.redirector import WidgetRedirector
 from tkinter import Listbox, IntVar, Checkbutton, messagebox, END, filedialog
@@ -7,34 +6,22 @@ from tkinter.messagebox import showinfo
 from datetime import datetime
 import os
 import pandas
-import twilio.base.exceptions
-from twilio.rest import Client
-
 import queries
 from database import Database
-from utilities import PhoneNumber
 from traceback import print_exc as tb
-from creds import Twilio, Company, Logs
+from creds import Company, Logs
 from error_handler import logger
-import concurrent.futures
 import threading
+from models.customers import Customers, Customer
+from models.campaign import Campaign
+from models.texts import Text
+from twilio.rest import Client
+from creds import Twilio
+import concurrent.futures
+import sys
 import time
-
-# Color Pallet
-DARK_GREEN = '#3A4D39'
-MEDIUM_DARK_GREEN = '#4F6F52'
-MEDIUM_GREEN = '#739072'
-BACKGROUND_COLOR = '#ECE3CE'
-
-application_title = f'{Company.name} Text Messaging'
-header_label_text = f'{Company.name}: '
-
-
-# Messaging
-header_text = f'{Company.name}: '
-
-# Graphics
-logo = './images/logo.png'
+from tkinter import ttk
+import twilio.base.exceptions
 
 
 #   ___ __  __ ___    ___   _   __  __ ___  _   ___ ___ _  _ ___
@@ -43,15 +30,142 @@ logo = './images/logo.png'
 #  |___|_|  |_|___/  \___/_/ \_|_|  |_|_|/_/ \_|___\___|_|\_|___/
 #
 # Author: Alex Powell
-# GUI version. To run on schedule, please use CLIVersion.py
+# Release Notes
+# 1.4 - Added threading
 
-
+version = 1.4
+DARK_GREEN = '#3A4D39'
+MEDIUM_DARK_GREEN = '#4F6F52'
+MEDIUM_GREEN = '#739072'
+BACKGROUND_COLOR = '#ECE3CE'
+application_title = f'{Company.name} Text Messaging'
+header_label_text = f'{Company.name}: '
+header_text = f'{Company.name}: '
+logo = './images/logo.png'
 TEST_MODE = False
 ORIGIN = 'MASS_CAMPAIGN'
-csv_data_dict = {}
 
 
-def select_file():
+def send_twilio_text(cust_txt: Text, client: Client):
+    try:
+        if cust_txt.media_url:
+            response = client.messages.create(
+                from_=Twilio.phone_number,
+                media_url=[cust_txt.media_url],
+                to=cust_txt.phone,
+                body=cust_txt.custom_message,
+            )
+        else:
+            response = client.messages.create(
+                from_=Twilio.phone_number, to=cust_txt.phone, body=cust_txt.custom_message
+            )
+    # Catch Errors
+    except twilio.base.exceptions.TwilioRestException as err:
+        logger.error(f'Twilio Error: {err.code} - {err.msg} - {cust_txt.phone} - {cust_txt.custom_message}')
+        cust_txt.response_code = err.code
+        cust_txt.response_text = err.msg
+
+        if err.code == 21614:
+            Database.SMS.move_phone_to_landline(cust_txt)
+
+        elif err.code == 21610:  # Previously unsubscribed
+            Database.SMS.unsubscribe(cust_txt)
+
+    return response
+
+
+class MessageSender:
+    def __init__(self, campaign: Campaign):
+        self.client = Client(Twilio.sid, Twilio.token)
+        self.campaign: Campaign = campaign
+        self.success_count: int = 0  # Successful messages
+        self.count: int = 0  # All message attempts
+        self.completed_message: str = ''
+
+    def send_text(self):
+        def send_helper(cust_txt: Text):
+            print(f'Sending to {cust_txt.phone}')
+
+            if self.campaign.test_mode:
+                cust_txt.sid = 'TEST'
+                self.success_count += 1
+            else:
+                try:
+                    response = send_twilio_text(cust_txt, self.client)
+                except Exception as err:
+                    logger.error(f'General Error: {tb()}')
+                    cust_txt.response_text = str(err)
+                else:
+                    cust_txt.sid = response.sid
+                    self.success_count += 1
+
+            self.count += 1
+            cust_txt.count = f'{self.count}/{self.campaign.customers.total_messages}'
+            Database.SMS.insert(cust_txt)
+
+        progress_bar.place(x=30, y=100, width=200)
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = []
+
+            for i, text in enumerate(self.campaign.texts):
+                progress.set(i / len(self.campaign.texts) * 100)
+                futures.append(executor.submit(send_helper, text))
+
+                # Rate limit to 20 tasks per second
+                if (i + 1) % 20 == 0:
+                    time.sleep(1)
+
+            # Wait for all futures to complete
+            concurrent.futures.wait(futures)
+
+            self.completed_message = (
+                f'Process complete!\n'
+                f'{self.success_count} messages sent. \n'
+                f'{self.campaign.customers.total_messages - self.success_count} messages failed.'
+            )
+
+
+csv_customers = None
+
+
+def get_customers() -> Customers:
+    # ----------GET DATA FROM SQL------------#
+    if segment_checkbutton_used() == 1:
+        segment = listbox.get(listbox.curselection())
+        sql_query = segment_dict[segment]
+        customers: Customers = Database.get_customers(sql_query)
+        if not customers:
+            messagebox.showerror(title='Error!', message='There was an error with the SQL query. Please try again.')
+            return
+
+        return customers
+
+    # ------------------OR-------------------#
+
+    # -------GET DATA FROM CSV---------#
+    elif csv_checkbutton_used() == 1:
+        return select_file()
+
+    # ----------DATA FOR SINGLE PHONE---------#
+    elif single_number_checkbutton_used() == 1:
+        return Customers(
+            [
+                {
+                    'CUST_NO': None,
+                    'NAM': None,
+                    'CUST_NAM_TYP': None,
+                    'PHONE_1': single_number_input.get(),
+                    'CONTCT_2': None,
+                    'PHONE_2': None,
+                    'LOY_PTS_BAL': None,
+                    'CATEG_COD': None,
+                }
+            ]
+        )
+
+
+def select_file() -> Customers:
     """File Selector for importing CSVs"""
     filetypes = (('csv files', '*.csv'), ('All files', '*.*'))
 
@@ -61,29 +175,31 @@ def select_file():
 
     # Read file
     csv_data = pandas.read_csv(cp_data)
-    global csv_data_dict
-    csv_data_dict = csv_data.to_dict('records')
-
-    # Format phone number
-    for customer in csv_data_dict:
-        customer['PHONE_1'] = PhoneNumber(str(customer['PHONE_1'])).to_twilio()
-        customer['PHONE_2'] = PhoneNumber(str(customer['PHONE_2'])).to_twilio()
 
     # Show first person's info
     try:
-        showinfo(
-            title='Selected File',
-            message=f"First Entry:\n{csv_data_dict[0]["NAM"]}, {csv_data_dict[0]["PHONE_1"]}, "
-            f"{csv_data_dict[0]["LOY_PTS_BAL"]}{csv_data_dict[0]["CATEG_COD"]}\n\n"
-            f"Total messages to send: {len(csv_data_dict)}",
-        )
-        return csv_data_dict
+        csv_customers: Customers = Customers(csv_data.to_dict('records'))
+        show_customer: Customer = csv_customers.list[0]
+        message = f"""
+        First Entry:
+        Name: {show_customer.name}
+        Type: {show_customer.type}
+        Phone 1: {show_customer.phone_1}
+        Contact 2: {show_customer.contact_2}
+        Phone 2: {show_customer.phone_2}
+        Loyalty Points: {show_customer.points}
+        Category Code: {show_customer.category}
+        Total messages to send: {csv_customers.total_messages}
+        """
+
+        showinfo(title='Selected File', message=message)
+        return csv_customers
 
     # Show Error If CSV doesn't include Name and Phone
-    except KeyError:
+    except TypeError:
         showinfo(
             title='Selected File',
-            message='Invalid File. CSV to contain CUST_NO, NAM, PHONE_1, LOY_PTS_BAL, CATEG_COD',
+            message='Invalid File. CSV to contain CUST_NO, NAM, PHONE_1, PHONE_2, LOY_PTS_BAL, CATEG_COD',
         )
 
 
@@ -92,205 +208,51 @@ def segment_length():
     try:
         segment = listbox.get(listbox.curselection())
         sql_query = segment_dict[segment]
-        messages_to_send = 0
-        sql_response = Database.query(sql_query)
-        for customer in sql_response:
-            if customer[2] and customer[2] != 'error':
-                messages_to_send += 1
-            if customer[3] and customer[3] != 'error':
-                messages_to_send += 1
-
-        if messages_to_send < 1:
+        customers: Customers = Database.get_customers(sql_query)
+        if customers.total_messages < 1:
             list_size.config(text='List is empty.')
-        elif messages_to_send == 1:
+
+        elif customers.total_messages == 1:
             # Because, grammar.
-            list_size.config(text=f'{messages_to_send} message will be sent.')
+            list_size.config(text=f'{customers.total_messages} message will be sent.')
         else:
-            list_size.config(text=f'{messages_to_send} messages will be sent.')
+            list_size.config(text=f'{customers.total_messages} messages will be sent.')
+
     except tkinter.TclError:
         list_size.config(text='Please select an option')
 
 
-def create_custom_message(customer: Database.SMS.CustomerText, message):
-    # Get Customer Name
-    name = customer.name
-    # Get Customer Reward Points
-    rewards = '$' + str(customer.points)
-
-    # If message has name variable
-    if '{name}' in message:
-        first_name = name.split(' ')[0].title()
-        message = message.replace('{name}', first_name)
-
-    # If message has rewards variable
-    if '{rewards}' in message:
-        message = message.replace('{rewards}', rewards)
-
-    return message
+def validate(input_text: str, media_url: str):
+    """Validate the input before sending"""
+    if not input_text and not media_url:
+        # If there is no message or photo, show an error
+        logger.error('No message or photo entered. Cannot send.')
+        messagebox.showerror(title='Error', message='Please enter a message to send.')
+        return False
+    if not input_text and media_url:
+        # If there is no message, but there is a photo, ask if they want to continue
+        logger.warning('No message entered, but photo link present.')
+        if not messagebox.askyesno(
+            title='Warning', message='You have not entered a message. Do you want to continue?'
+        ):
+            return False
+    return True
 
 
 def send_text():
-    # Get Listbox Value, Present Message Box with Segment
-    message_script = header_text + message_box.get('1.0', END)
+    customers = get_customers()
+    input_text = message_box.get('1.0', END).strip()
+    message_script = header_text + input_text
+    media_url = photo_input.get() if photo_checkbutton_used() else None
+
+    if not validate(input_text, media_url):
+        return
+
+    campaign = Campaign(is_test(), f'{datetime.now():%Y-%m-%d %H:%M:%S}', message_script, customers, media_url)
+    sender = MessageSender(campaign)
 
     def send_text_thread():
         try:
-            # ----------GET DATA FROM SQL------------#
-            if segment_checkbutton_used() == 1:
-                segment = listbox.get(listbox.curselection())
-                sql_query = segment_dict[segment]
-                cp_data = Database.query(sql_query)
-                if cp_data is None:
-                    messagebox.showerror(
-                        title='Error!', message='There was an error with the SQL query. Please try again.'
-                    )
-                    return
-                else:
-                    cp_data = [
-                        {
-                            'CUST_NO': customer[0],
-                            'NAM': customer[1],
-                            'PHONE_1': PhoneNumber(customer[2]).to_twilio() if customer[2] else '',
-                            'PHONE_2': PhoneNumber(customer[3]).to_twilio() if customer[3] else '',
-                            'LOY_PTS_BAL': customer[4],
-                            'CATEG_COD': customer[5],
-                        }
-                        for customer in cp_data
-                    ]
-
-            # ------------------OR-------------------#
-
-            # -------GET DATA FROM CSV---------#
-            elif csv_checkbutton_used() == 1:
-                cp_data = csv_data_dict
-
-            # ----------DATA FOR SINGLE PHONE---------#
-            elif single_number_checkbutton_used() == 1:
-                single_phone = PhoneNumber(single_number_input.get()).to_twilio()
-                cp_data = [
-                    {
-                        'CUST_NO': '',
-                        'NAM': '',
-                        'PHONE_1': single_phone,
-                        'PHONE_2': '',
-                        'LOY_PTS_BAL': 0,
-                        'CATEG_COD': '',
-                    }
-                ]
-
-            class MessageSender:
-                def __init__(self, cp_data: list[dict]):
-                    self.client = Client(Twilio.sid, Twilio.token)
-                    self.campaign = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    self.cp_data = cp_data
-                    self.messages_to_send: int = 0
-                    self.total_messages_sent: int = 0  # Successful messages
-                    self.count: int = 0  # All message attempts
-                    self.completed_message: str = ''
-                    self.get_messages_to_send()
-
-                def get_messages_to_send(self):
-                    for customer in self.cp_data:
-                        if customer['PHONE_1'] and customer['PHONE_1'] != 'error':
-                            self.messages_to_send += 1
-                        if customer['PHONE_2'] and customer['PHONE_2'] != 'error':
-                            self.messages_to_send += 1
-
-                def send_text(self):
-                    def send_helper(cust_txt: Database.SMS.CustomerText):
-                        print(f'Sending to {cust_txt.phone}')
-                        cust_txt.message = create_custom_message(cust_txt, message_script)
-                        cust_txt.campaign = self.campaign
-                        # Filter out any phone errors
-
-                        if cust_txt.phone == 'error':
-                            cust_txt.response_text = 'Invalid phone'
-                            Database.SMS.insert(customer_text=cust_txt)
-                            return
-                        elif test_mode():
-                            cust_txt.sid = 'TEST'
-                            self.total_messages_sent += 1
-                        else:
-                            try:
-                                if photo_checkbutton_used():
-                                    cust_txt.media = photo_input.get()
-                                    twilio_message = self.client.messages.create(
-                                        from_=Twilio.phone_number,
-                                        media_url=[cust_txt.media],
-                                        to=cust_txt.phone,
-                                        body=cust_txt.message,
-                                    )
-                                else:
-                                    twilio_message = self.client.messages.create(
-                                        from_=Twilio.phone_number, to=cust_txt.phone, body=cust_txt.message
-                                    )
-                            # Catch Errors
-                            except twilio.base.exceptions.TwilioRestException as err:
-                                logger.error(
-                                    f'Twilio Error: {err.code} - {err.msg} - {cust_txt.phone} - {cust_txt.message}'
-                                )
-                                cust_txt.response_code = err.code
-                                cust_txt.response_text = err.msg
-                                if err.code == 21614:
-                                    Database.SMS.move_phone_1_to_landline(customer_text=cust_txt)
-                                elif err.code == 21610:  # Previously unsubscribed
-                                    Database.SMS.unsubscribe(cust_txt)
-                            except KeyboardInterrupt:
-                                sys.exit()
-                            except Exception as err:
-                                logger.error(f'General Error: {tb()}')
-                                cust_txt.response_text = str(err)
-                            # Success
-                            else:
-                                cust_txt.sid = twilio_message.sid
-                                self.total_messages_sent += 1
-
-                        self.count += 1
-                        cust_txt.count = f'{self.count}/{self.messages_to_send}'
-                        Database.SMS.insert(cust_txt)
-                        progress_text_label.config(text=f'Messages Sent: {self.count}/{self.messages_to_send}')
-                        canvas.update()
-
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        futures = []
-                        for i, customer in enumerate(self.cp_data):
-                            cust_no = customer['CUST_NO']
-                            name = customer['NAM']
-                            ph_1 = customer['PHONE_1']
-                            ph_2 = customer['PHONE_2']
-                            pts = customer['LOY_PTS_BAL']
-                            cat = customer['CATEG_COD']
-
-                            cust_txt = Database.SMS.CustomerText(
-                                phone=ph_1, cust_no=cust_no, points=pts, category=cat, name=name
-                            )
-
-                            futures.append(executor.submit(send_helper, cust_txt))
-
-                            if ph_2:
-                                cust_txt_2 = Database.SMS.CustomerText(
-                                    phone=ph_2, cust_no=cust_no, points=pts, category=cat, name=name
-                                )
-                                futures.append(executor.submit(send_helper, cust_txt_2))
-
-                            # Rate limit to 20 tasks per second
-                            if (i + 1) % 20 == 0:
-                                time.sleep(1)
-
-                        # Wait for all futures to complete
-                        concurrent.futures.wait(futures)
-
-                    self.completed_message = (
-                        f'Process complete!\n'
-                        f'{self.total_messages_sent} messages sent. \n'
-                        f'{self.messages_to_send - self.total_messages_sent} messages failed. \n\n'
-                        f'Would you like to see the log?'
-                    )
-
-                    if messagebox.askyesno(title='Completed', message=self.completed_message):
-                        view_log()
-
-            sender = MessageSender(cp_data)
             sender.send_text()
 
         except Exception as e:
@@ -299,7 +261,13 @@ def send_text():
                 title='Error', message='An error occurred while sending texts. Please check the log.'
             )
 
-    threading.Thread(target=send_text_thread).start()
+        else:
+            messagebox.showinfo(title='Completed', message=sender.completed_message)
+
+    try:
+        threading.Thread(target=send_text_thread).start()
+    except KeyboardInterrupt:
+        sys.exit()
 
 
 # ---------------------------- UI SETUP ------------------------------- #
@@ -308,7 +276,7 @@ window.title(application_title)
 window.config(padx=30, pady=10, background=BACKGROUND_COLOR)
 
 
-def center_window(width=410, height=950):
+def center_window(width=400, height=760):
     # get screen width and height
     screen_width = window.winfo_screenwidth()
     screen_height = window.winfo_screenheight()
@@ -434,29 +402,26 @@ def single_number_checkbutton_used():
         return 1
 
 
-def test_mode() -> bool:
-    check = test_mode_checkbox_state.get()
-    if check == 1:
-        return True
+def is_test() -> bool:
+    return test_mode_checkbox_state.get() == 1
 
 
 def view_log():
     subprocess.Popen(f'explorer /open, {Logs.sms}')
 
 
-# Logo
 canvas = tkinter.Canvas(
     width=350, height=172, background=BACKGROUND_COLOR, highlightcolor=BACKGROUND_COLOR, highlightthickness=0
 )
 
-logo = tkinter.PhotoImage(file=logo)
+# logo = tkinter.PhotoImage(file=logo)
 
-canvas.create_image(175, 86, image=logo)
-canvas.grid(column=0, row=0, pady=3, columnspan=3)
+# canvas.create_image(175, 86, image=logo)
+# canvas.grid(column=0, row=0, pady=3, columnspan=3)
 
 # SMS Text Messaging Sub Title
 website_label = tkinter.Label(
-    text='SMS Text Messaging', font=('Arial', 12), fg=MEDIUM_DARK_GREEN, background=BACKGROUND_COLOR
+    text='Create Campaign', font=('Arial', 12), fg=MEDIUM_DARK_GREEN, background=BACKGROUND_COLOR
 )
 website_label.grid(column=0, row=1, columnspan=3, pady=5)
 
@@ -518,30 +483,12 @@ segment_dict = {
     'SMS Test Group': queries.test_group_1,
     'Wholesale Customers': queries.wholesale_all,
     'Retail Customers: All': queries.retail_all,
-    "Yesterday's Shoppers": queries.yesterday_purchases,
-    '5-Day Follow Up': queries.five_days_ago_purchases,
-    '1-Week Follow Up': queries.one_week_ago_purchases,
     'Retail Most Recent 1000': queries.retail_recent_1000,
     'Retail Most Recent 2000': queries.retail_recent_2000,
     'Retail Most Recent 3000': queries.retail_recent_3000,
     'Retail Most Recent 4000': queries.retail_recent_4000,
-    'Spring Annual Shoppers': queries.spring_annual_shoppers,
-    'Fall Mum Shoppers': queries.fall_mum_shoppers,
-    'Christmas Shoppers': queries.christmas_shoppers,
     'No Purchases: 6 Months': queries.no_purchases_6_months,
     'No Purchases: 12 Months': queries.no_purchases_12_months,
-    'Birthday: January': queries.january_bday,
-    'Birthday: February': queries.february_bday,
-    'Birthday: March': queries.march_bday,
-    'Birthday: April': queries.april_bday,
-    'Birthday: May': queries.may_bday,
-    'Birthday: June': queries.june_bday,
-    'Birthday: July': queries.july_bday,
-    'Birthday: August': queries.august_bday,
-    'Birthday: September': queries.september_bday,
-    'Birthday: October': queries.october_bday,
-    'Birthday: November': queries.november_bday,
-    'Birthday: December': queries.december_bday,
 }
 segments = list(segment_dict.keys())
 for item in segments:
@@ -631,7 +578,7 @@ test_mode_checkbox = Checkbutton(
     text='Test Mode',
     font=('Arial', 10),
     variable=test_mode_checkbox_state,
-    command=test_mode,
+    command=is_test,
     fg='black',
     background=BACKGROUND_COLOR,
 )
@@ -644,12 +591,14 @@ log_button = tkinter.Button(
 )
 log_button.grid(row=19, column=1, columnspan=1, pady=3)
 
-progress_text_label = tkinter.Label(text='', font=('Arial', 10), background=BACKGROUND_COLOR, fg=MEDIUM_DARK_GREEN)
-progress_text_label.grid(column=0, row=21, columnspan=3, pady=0)
+
+progress = tkinter.IntVar()
+progress_bar = ttk.Progressbar(variable=progress, maximum=100, mode='determinate')
+
 
 # Version Number
 header_text_label = tkinter.Label(
-    text='      Version 1.3.01', font=('Arial', 9), fg=MEDIUM_DARK_GREEN, background=BACKGROUND_COLOR
+    text=f'      Version {version}', font=('Arial', 9), fg=MEDIUM_DARK_GREEN, background=BACKGROUND_COLOR
 )
 header_text_label.grid(column=2, row=19, columnspan=1, pady=0)
 
