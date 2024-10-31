@@ -210,6 +210,7 @@ def segment_length():
         segment = listbox.get(listbox.curselection())
         sql_query = segment_dict[segment]
         customers: Customers = Database.get_customers(sql_query)
+        print(customers)
         if customers.total_messages < 1:
             list_size.config(text='List is empty.')
 
