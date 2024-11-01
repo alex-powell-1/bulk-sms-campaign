@@ -24,11 +24,6 @@ from tkinter import ttk
 import twilio.base.exceptions
 
 
-#   ___ __  __ ___    ___   _   __  __ ___  _   ___ ___ _  _ ___
-#  / __|  \/  / __|  / __| /_\ |  \/  | _ \/_\ |_ _/ __| \| / __|
-#  \__ | |\/| \__ \ | (__ / _ \| |\/| |  _/ _ \ | | (_ | .` \__ \
-#  |___|_|  |_|___/  \___/_/ \_|_|  |_|_|/_/ \_|___\___|_|\_|___/
-#
 # Author: Alex Powell
 # Release Notes
 # 1.4 - Added threading
@@ -44,6 +39,31 @@ header_text = f'{Company.name}: '
 logo = './images/logo.png'
 TEST_MODE = False
 ORIGIN = 'MASS_CAMPAIGN'
+art = rf"""
+   ___ __  __ ___    ___   _   __  __ ___  _   ___ ___ _  _ ___
+  / __|  \/  / __|  / __| /_\ |  \/  | _ \/_\ |_ _/ __| \| / __|
+  \__ | |\/| \__ \ | (__ / _ \| |\/| |  _/ _ \ | | (_ | .` \__ \
+  |___|_|  |_|___/  \___/_/ \_|_|  |_|_|/_/ \_|___\___|_|\_|___/
+
+  Version: {version}
+"""
+print(art)
+
+
+def is_test() -> bool:
+    return test_mode_checkbox_state.get() == 1
+
+
+def get_input_text() -> str:
+    return message_box.get('1.0', END).strip()
+
+
+def get_media_url() -> str:
+    return photo_input.get() if photo_checkbutton_used() else None
+
+
+def get_campaign_name() -> str:
+    return f'{datetime.now():%Y-%m-%d %H:%M:%S}'
 
 
 def send_twilio_text(cust_txt: Text, client: Client):
@@ -180,6 +200,10 @@ def select_file() -> Customers:
     # Show first person's info
     try:
         csv_customers: Customers = Customers(csv_data.to_dict('records'))
+
+        preview = Campaign(is_test(), 'Preview', get_input_text(), csv_customers, get_media_url())
+        print(preview)
+
         show_customer: Customer = csv_customers.list[0]
         message = f"""
         First Entry:
@@ -194,10 +218,12 @@ def select_file() -> Customers:
         """
 
         showinfo(title='Selected File', message=message)
+
         return csv_customers
 
     # Show Error If CSV doesn't include Name and Phone
-    except TypeError:
+    except TypeError as e:
+        logger.error(f'Error in select_file: {e} {tb()}')
         showinfo(
             title='Selected File',
             message='Invalid File. CSV to contain CUST_NO, NAM, PHONE_1, PHONE_2, LOY_PTS_BAL, CATEG_COD',
@@ -210,7 +236,8 @@ def segment_length():
         segment = listbox.get(listbox.curselection())
         sql_query = segment_dict[segment]
         customers: Customers = Database.get_customers(sql_query)
-        print(customers)
+        preview = Campaign(is_test(), get_campaign_name(), get_input_text(), customers, get_media_url())
+        print(preview)
         if customers.total_messages < 1:
             list_size.config(text='List is empty.')
 
@@ -243,14 +270,14 @@ def validate(input_text: str, media_url: str):
 
 def send_text():
     customers = get_customers()
-    input_text = message_box.get('1.0', END).strip()
+    input_text = get_input_text()
     message_script = header_text + input_text
-    media_url = photo_input.get() if photo_checkbutton_used() else None
+    media_url = get_media_url()
 
     if not validate(input_text, media_url):
         return
 
-    campaign = Campaign(is_test(), f'{datetime.now():%Y-%m-%d %H:%M:%S}', message_script, customers, media_url)
+    campaign = Campaign(is_test(), get_campaign_name(), message_script, customers, media_url)
     sender = MessageSender(campaign)
 
     def send_text_thread():
@@ -406,10 +433,6 @@ def single_number_checkbutton_used():
         calculate_size_button.config(state='disabled')
         list_size.config(text='')
         return 1
-
-
-def is_test() -> bool:
-    return test_mode_checkbox_state.get() == 1
 
 
 def view_log():
